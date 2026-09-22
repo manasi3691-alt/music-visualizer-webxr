@@ -15,6 +15,7 @@ import { performanceMonitor } from '../performance/PerformanceMonitor.js';
 import { xrSetup } from '../xr/XRSetup.js';
 import { xrState } from '../xr/XRState.js';
 import { detectQualityProfile } from '../performance/QualityProfile.js';
+import { wristUIController } from '../ui/WristUIController.js';
 
 export let experienceWorld: ExperienceWorld | null = null;
 
@@ -44,6 +45,9 @@ export class ExperienceApp {
 
     // 2. Setup XR integration
     xrSetup.init(world);
+
+    // 2b. Setup Wrist UI controller (XR and Desktop fallback)
+    wristUIController.init(world);
 
     // 3. Setup Desktop Fallback input
     const canvas = document.querySelector('canvas') || (document.getElementById('scene-container') as HTMLElement);
@@ -123,6 +127,9 @@ export class ExperienceApp {
     if (this.showDebug && this.debugOverlay) {
       this.updateDebugOverlay(frameData, metrics);
     }
+
+    // 6. Update Wrist UI panel
+    wristUIController.update(deltaSec);
   }
 
   async start(): Promise<void> {
