@@ -1,6 +1,6 @@
 /**
  * WristUI: Procedural holographic control panel.
- * Task 2 — Visual panel construction (no interaction yet).
+ * Task 3 — Open/close animation.
  *
  * Requirements:
  * - Rounded rectangular panel (dimensions ~0.09 x 0.13 x 0.005 m, triangle count < 1500)
@@ -13,7 +13,10 @@
  *     4. PROGRESS (read-only bar)
  *     5. CLOSE
  * - Soft gradient via vertex colors or overlay plane (no custom GLSL)
- * - Attach panel to THREE.Group passed into constructor. Do NOT add to scene yet.
+ * - open() and close() animate opacity 0<->1 and scale 0.92<->1.0 over 180-250 ms (open) / 150-220 ms (close)
+ * - Use existing render loop's delta time (dt). No setTimeout / setInterval.
+ * - Use ease-out cubic.
+ * - State transitions handled via WristUIState (OPEN, CLOSED, TRANSITIONING).
  */
 
 import {
@@ -50,6 +53,10 @@ export class WristUI {
   readonly group: Group;
   private _state: WristUIState = WristUIState.CLOSED;
 
+  // Animation transition state
+  private targetOpen = false;
+  private transitionProgress = 0.0; // 0.0 = fully closed, 1.0 = fully open
+
   // Root container for all procedural panel visual assets
   private panelContainer: Group = new Group();
 
@@ -59,9 +66,11 @@ export class WristUI {
   private borderLine: LineLoop | null = null;
   private borderMaterial: LineBasicMaterial | null = null;
   private gradientOverlay: Mesh | null = null;
+  private gradientMaterial: MeshBasicMaterial | null = null;
 
-  // Control meshes
+  // Control meshes & materials for opacity modulation
   private controls: Map<string, UIControlMesh> = new Map();
+  private controlMaterials: { material: MeshPhysicalMaterial | MeshBasicMaterial; baseOpacity: number }[] = [];
 
   // Disposables tracking for clean teardown
   private disposableGeometries: BufferGeometry[] = [];
@@ -77,17 +86,21 @@ export class WristUI {
     // Attach to provided parent group
     this.group.add(this.panelContainer);
 
-    // Initial state: hidden & scaled to min
+    // Initial state: fully closed (hidden, opacity 0, scale 0.92)
+    this.applyTransition(0.0);
     this.group.visible = false;
-    this.group.scale.set(
-      WRIST_UI_DIMENSIONS.minScale,
-      WRIST_UI_DIMENSIONS.minScale,
-      WRIST_UI_DIMENSIONS.minScale
-    );
   }
 
   get state(): WristUIState {
     return this._state;
+  }
+
+  get isOpen(): boolean {
+    return this._state === WristUIState.OPEN || (this._state === WristUIState.TRANSITIONING && this.targetOpen);
+  }
+
+  get isClosed(): boolean {
+    return this._state === WristUIState.CLOSED || (this._state === WristUIState.TRANSITIONING && !this.targetOpen);
   }
 
   get panelGroup(): Group {
@@ -102,19 +115,92 @@ export class WristUI {
     return Array.from(this.controls.values());
   }
 
+  /**
+   * Opens the panel with smooth ease-out cubic animation
+   */
   open(): void {
-    this._state = WristUIState.OPEN;
+    if (this._state === WristUIState.OPEN && this.transitionProgress >= 1.0) {
+      return;
+    }
+    this.targetOpen = true;
+    this._state = WristUIState.TRANSITIONING;
     this.group.visible = true;
   }
 
+  /**
+   * Closes the panel with smooth ease-out cubic animation
+   */
   close(): void {
-    this._state = WristUIState.CLOSED;
-    this.group.visible = false;
+    if (this._state === WristUIState.CLOSED && this.transitionProgress <= 0.0) {
+      return;
+    }
+    this.targetOpen = false;
+    this._state = WristUIState.TRANSITIONING;
   }
 
+  /**
+   * Toggles panel between open and closed
+   */
+  toggle(): void {
+    if (this.isOpen) {
+      this.close();
+    } else {
+      this.open();
+    }
+  }
+
+  /**
+   * Advances open/close animation over delta time (dt) in seconds.
+   * Driven strictly by the render loop (no setTimeout/setInterval).
+   */
   update(dt: number): void {
-    // Animation transitions will be implemented in Task 3
-    void dt;
+    if (this._state === WristUIState.TRANSITIONING) {
+      if (this.targetOpen) {
+        this.transitionProgress += dt / WRIST_UI_DIMENSIONS.openDurationSec;
+        if (this.transitionProgress >= 1.0) {
+          this.transitionProgress = 1.0;
+          this._state = WristUIState.OPEN;
+        }
+      } else {
+        this.transitionProgress -= dt / WRIST_UI_DIMENSIONS.closeDurationSec;
+        if (this.transitionProgress <= 0.0) {
+          this.transitionProgress = 0.0;
+          this._state = WristUIState.CLOSED;
+          this.group.visible = false;
+        }
+      }
+      this.applyTransition(this.transitionProgress);
+    }
+  }
+
+  /**
+   * Applies ease-out cubic curve to scale (0.92 <-> 1.0) and opacity (0.0 <-> 1.0).
+   * Ease-out cubic: 1 - (1 - t)^3
+   */
+  private applyTransition(t: number): void {
+    const clampedT = Math.max(0, Math.min(1, t));
+    const inv = 1 - clampedT;
+    const eased = 1 - inv * inv * inv;
+
+    // 1. Scale animation: 0.92 <-> 1.0
+    const minS = WRIST_UI_DIMENSIONS.minScale;
+    const maxS = WRIST_UI_DIMENSIONS.maxScale;
+    const currentScale = minS + (maxS - minS) * eased;
+    this.group.scale.set(currentScale, currentScale, currentScale);
+
+    // 2. Opacity animation: 0 <-> 1
+    if (this.panelMaterial) {
+      this.panelMaterial.opacity = WRIST_UI_OPACITY.open * eased;
+    }
+    if (this.borderMaterial) {
+      this.borderMaterial.opacity = 0.75 * eased;
+    }
+    if (this.gradientMaterial) {
+      this.gradientMaterial.opacity = 0.25 * eased;
+    }
+    for (const entry of this.controlMaterials) {
+      entry.material.opacity = entry.baseOpacity * eased;
+    }
   }
 
   /**
@@ -232,15 +318,15 @@ export class WristUI {
     ]);
     gradGeometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
 
-    const gradMaterial = new MeshBasicMaterial({
+    this.gradientMaterial = new MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
       opacity: 0.25,
       depthWrite: false,
     });
-    this.disposableMaterials.push(gradMaterial);
+    this.disposableMaterials.push(this.gradientMaterial);
 
-    this.gradientOverlay = new Mesh(gradGeometry, gradMaterial);
+    this.gradientOverlay = new Mesh(gradGeometry, this.gradientMaterial);
     this.gradientOverlay.name = 'WristUI_GradientOverlay';
     this.gradientOverlay.position.z = depth * 0.5 + 0.0006;
     this.panelContainer.add(this.gradientOverlay);
@@ -310,6 +396,7 @@ export class WristUI {
       depthWrite: false,
     });
     this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
 
     const mesh = new Mesh(geom, mat);
     mesh.name = 'WristUI_StatusIndicator';
@@ -354,6 +441,7 @@ export class WristUI {
       depthWrite: false,
     });
     this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
 
     const mesh = new Mesh(geom, mat);
     mesh.name = 'WristUI_CloseButton';
@@ -400,6 +488,7 @@ export class WristUI {
       depthWrite: false,
     });
     this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
 
     const mesh = new Mesh(geom, mat);
     mesh.name = 'WristUI_ProgressBar';
@@ -451,6 +540,7 @@ export class WristUI {
       emissiveIntensity: WRIST_UI_EMISSIVE.buttonNormalIntensity,
     });
     this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
 
     const mesh = new Mesh(geom, mat);
     mesh.name = 'WristUI_PlayPauseButton';
@@ -498,6 +588,7 @@ export class WristUI {
       emissiveIntensity: WRIST_UI_EMISSIVE.buttonNormalIntensity,
     });
     this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
 
     const mesh = new Mesh(geom, mat);
     mesh.name = 'WristUI_RestartButton';
@@ -550,10 +641,12 @@ export class WristUI {
     }
     this.disposableTextures.length = 0;
 
+    this.controlMaterials.length = 0;
     this.controls.clear();
     this.panelContainer.clear();
     this.panelMesh = null;
     this.borderLine = null;
     this.gradientOverlay = null;
+    this.gradientMaterial = null;
   }
 }
