@@ -1,288 +1,314 @@
 /**
- * WristUIController: Manages attachment, spatial hitboxes, and input routing
- * for the WristUI panel across WebXR and Desktop environments.
- *
- * Responsibilities:
- * - Attach ONE panel to controller grip group (prefer left if available; NEVER two panels)
- * - Invisible activation hitbox (~0.12 m) triggered via poke/ray
- * - Wire buttons to existing systems only (AudioEngine, ExperienceApp, ExperienceState, MusicExcerpt)
- * - Desktop fallback: Tab key binding, small DOM button, positioned ~0.6 m in front of camera
- * - Ensure existing Touch/Poke/Grab/Pull/Scale and desktop mouse interactions keep working
+ * WristUIController: Wires WristUI with the existing application systems.
+ * Task 4 — Desktop fallback (Tab key, DOM button, camera mounting).
+ * Task 5 — Live data wiring: status, progress, button click actions.
+ * Task 6 — XR wrist mounting: left grip space when XR active, camera when desktop.
  */
 
-import {
-  World,
-  Camera,
-  Raycaster,
-  Vector2,
-  Vector3,
-  Mesh,
-  SphereGeometry,
-  MeshBasicMaterial,
-  Object3D,
-} from '@iwsdk/core';
+import { Group, Camera, Raycaster, Vector2 } from '@iwsdk/core';
+import type { World } from '@iwsdk/core';
 import { WristUI } from './WristUI.js';
 import { WRIST_UI_DIMENSIONS } from './WristUIStyles.js';
-import { WristUIState } from './WristUIState.js';
-import { experienceState } from '../app/ExperienceState.js';
+import { ExperiencePhase, XRLifecycleState } from '../app/ExperienceState.js';
+
+export interface WristUIDependencies {
+  audio: {
+    play: () => Promise<void>;
+    resume: () => void;
+    pause: () => void;
+    getCurrentTime: () => number;
+    isPlaying: () => boolean;
+  };
+  excerpt: {
+    sourceStart: number;
+    sourceEnd: number;
+    duration: number;
+  };
+  state: {
+    getCurrentPhase: () => ExperiencePhase;
+    subscribePhase: (listener: (phase: ExperiencePhase, prev: ExperiencePhase) => void) => () => void;
+    subscribeXR?: (listener: (state: XRLifecycleState, prev: XRLifecycleState) => void) => () => void;
+  };
+  replay: () => void;
+  world?: World;
+  camera?: Camera;
+}
 
 export class WristUIController {
-  readonly wristUI: WristUI = new WristUI();
+  private wristUI: WristUI | null = null;
+  private deps: WristUIDependencies | null = null;
+  private readonly rootGroup: Group = new Group();
 
-  private world: World | null = null;
-  private camera: Camera | null = null;
-  private currentParent: Object3D | null = null;
-  private isXRMode = false;
+  // Mounting handles
+  private currentParent: Camera | Group | null = null;
+  private isXRActive = false;
 
-  // Activation hitbox (~0.12 m)
-  private activationHitbox: Mesh | null = null;
-  private hitboxWorldPos = new Vector3();
-  private indexTipWorldPos = new Vector3();
-
-  // Raycasting for desktop & XR selection
-  private raycaster: Raycaster = new Raycaster();
-  private pointerCoords: Vector2 = new Vector2();
-
-  // Desktop DOM fallback toggle button
+  // Desktop integration handles
   private domToggleButton: HTMLButtonElement | null = null;
+  private boundOnKeyDown: ((e: KeyboardEvent) => void) | null = null;
+  private unsubscribeXR: (() => void) | null = null;
+  private unsubscribePhase: (() => void) | null = null;
 
-  private isAttachedToController = false;
+  // Desktop click detection via Raycaster
+  private raycaster: Raycaster = new Raycaster();
+  private pointer: Vector2 = new Vector2();
+  private boundOnPointerDown: ((e: PointerEvent) => void) | null = null;
 
-  constructor() {
-    this.initActivationHitbox();
+  // XR select listener reference
+  private boundOnXRSelect: ((e: Event) => void) | null = null;
+  private xrSession: XRSession | null = null;
+
+  init(deps: WristUIDependencies): void {
+    this.deps = deps;
+    this.wristUI = new WristUI(this.rootGroup);
+
+    // 1. Desktop mounting: Position ~0.6m in front of camera
+    this.setupDesktopMounting();
+
+    // 2. Keyboard shortcut: Bind Tab to toggle open/close
+    this.setupKeyboardShortcut();
+
+    // 3. Desktop toggle button in corner
+    this.setupDesktopDOMButton();
+
+    // 4. Listen for XR lifecycle to switch mounting and hide DOM button
+    if (deps.state.subscribeXR) {
+      this.unsubscribeXR = deps.state.subscribeXR((xrState) => {
+        if (xrState === 'ACTIVE') {
+          this.onXRActive();
+        } else if (xrState === 'ENDED' || xrState === 'NONE') {
+          this.onXREnded();
+        }
+        if (this.domToggleButton) {
+          this.domToggleButton.style.display = xrState === 'ACTIVE' ? 'none' : 'flex';
+        }
+      });
+    }
+
+    // 5. Subscribe to phase changes to live-update STATUS label
+    this.unsubscribePhase = deps.state.subscribePhase((phase) => {
+      this.wristUI?.updateStatus(phase);
+    });
+    // Seed the current phase label immediately
+    this.wristUI.updateStatus(deps.state.getCurrentPhase());
+
+    // 6. Desktop pointer click handler for button hit-detection
+    this.setupDesktopClickHandler();
+
+    console.log('[WristUIController] Initialized (tasks 4+5+6)');
   }
 
-  get isOpen(): boolean {
-    return this.wristUI.isOpen;
+  getUI(): WristUI | null {
+    return this.wristUI;
+  }
+
+  getGroup(): Group {
+    return this.rootGroup;
+  }
+
+  // ─── XR mounting ──────────────────────────────────────────────────────────
+
+  /**
+   * Called when XR session becomes ACTIVE.
+   * Detaches panel from camera and attaches to left grip space (wrist).
+   * Registers XR select event listener for button clicks.
+   */
+  private onXRActive(): void {
+    this.isXRActive = true;
+    const world = this.deps?.world;
+    if (world) {
+      const leftGrip = world.player.gripSpaces.left;
+      if (this.currentParent) {
+        this.currentParent.remove(this.rootGroup);
+      }
+      leftGrip.add(this.rootGroup);
+      this.currentParent = leftGrip;
+
+      // Position panel on inner-wrist face, rotated to face the user when palm is up
+      this.rootGroup.position.set(0, WRIST_UI_DIMENSIONS.wristOffset, 0);
+      this.rootGroup.rotation.set(-Math.PI * 0.5, 0, 0);
+    }
+
+    // Register XR select handler on the session
+    const session = this.deps?.world?.session;
+    if (session && !this.boundOnXRSelect) {
+      this.boundOnXRSelect = (e: Event) => this.handleXRSelect(e as XRInputSourceEvent);
+      session.addEventListener('selectstart', this.boundOnXRSelect);
+      this.xrSession = session;
+    }
+
+    console.log('[WristUIController] XR active — panel mounted to left wrist grip');
   }
 
   /**
-   * Initializes controller with the IWSDK World and binds input listeners
+   * Called when XR session ends or is not yet active.
+   * Re-attaches panel to camera for desktop viewing.
    */
-  init(world: World): void {
-    this.world = world;
-    this.camera = world.camera;
+  private onXREnded(): void {
+    this.isXRActive = false;
 
-    // Listen for XR session state transitions
-    experienceState.subscribeXR((xrState) => {
-      this.isXRMode = xrState === 'ACTIVE';
-      this.syncAttachment();
-    });
+    // Unregister XR select listener
+    if (this.xrSession && this.boundOnXRSelect) {
+      this.xrSession.removeEventListener('selectstart', this.boundOnXRSelect);
+      this.boundOnXRSelect = null;
+      this.xrSession = null;
+    }
 
-    // Setup initial placement (Desktop fallback by default)
-    this.syncAttachment();
+    // Revert to camera mount
+    this.setupDesktopMounting();
+    console.log('[WristUIController] XR ended — panel reverted to camera mount');
+  }
 
-    // Desktop Tab key toggle
-    window.addEventListener('keydown', (e) => {
+  // ─── Desktop mounting ──────────────────────────────────────────────────────
+
+  /**
+   * Positions the panel ~0.6m in front of the camera on desktop (not attached to wrist)
+   */
+  private setupDesktopMounting(): void {
+    const camera = this.deps?.camera || this.deps?.world?.camera;
+    if (camera) {
+      if (this.currentParent) {
+        this.currentParent.remove(this.rootGroup);
+      }
+      camera.add(this.rootGroup);
+      this.currentParent = camera;
+      this.rootGroup.position.set(0.0, -0.04, -WRIST_UI_DIMENSIONS.desktopDistance);
+      this.rootGroup.rotation.set(0, 0, 0);
+    }
+  }
+
+  // ─── Input bindings ────────────────────────────────────────────────────────
+
+  /**
+   * Binds Tab key to toggle panel open/close
+   */
+  private setupKeyboardShortcut(): void {
+    this.boundOnKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Tab') {
         e.preventDefault();
-        this.wristUI.toggle();
+        this.wristUI?.toggle();
       }
-    });
-
-    // Create desktop DOM toggle button
-    this.createDesktopToggleButton();
-  }
-
-  private initActivationHitbox(): void {
-    // ~0.12 m invisible activation hitbox
-    const radius = WRIST_UI_DIMENSIONS.activationHitboxDiameter / 2;
-    const geometry = new SphereGeometry(radius, 8, 8);
-    const material = new MeshBasicMaterial({
-      visible: false,
-      transparent: true,
-      opacity: 0.0,
-      depthWrite: false,
-    });
-    this.activationHitbox = new Mesh(geometry, material);
-    this.activationHitbox.name = 'WristUIActivationHitbox';
+    };
+    window.addEventListener('keydown', this.boundOnKeyDown);
   }
 
   /**
-   * Syncs panel parenting between Left Controller Grip (XR) and Camera (Desktop)
+   * Desktop pointer-down handler.
+   * Casts a ray from the mouse position into the scene and checks if any
+   * interactive WristUI button was hit. Only fires when the panel is open.
    */
-  syncAttachment(): void {
-    if (!this.world) return;
+  private setupDesktopClickHandler(): void {
+    this.boundOnPointerDown = (e: PointerEvent) => {
+      if (!this.wristUI?.isOpen) return;
+      const canvas = document.querySelector('canvas');
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      this.pointer.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const camera = this.deps?.camera || this.deps?.world?.camera;
+      if (!camera) return;
+      this.raycaster.setFromCamera(this.pointer, camera);
 
-    if (this.isXRMode) {
-      this.attachToController();
-      if (this.domToggleButton) {
-        this.domToggleButton.style.display = 'none';
+      const hitMeshes = this.wristUI.getHitTestMeshes();
+      const objects = hitMeshes.map((h) => h.mesh);
+      const hits = this.raycaster.intersectObjects(objects, false);
+      if (hits.length > 0) {
+        const hitMesh = hits[0].object;
+        const found = hitMeshes.find((h) => h.mesh === hitMesh);
+        if (found) this.handleButtonAction(found.id);
       }
-    } else {
-      this.attachToDesktopCamera();
-      if (this.domToggleButton) {
-        this.domToggleButton.style.display = 'flex';
-      }
+    };
+    window.addEventListener('pointerdown', this.boundOnPointerDown);
+  }
+
+  /**
+   * XR select-start handler.
+   * Uses the right-hand ray space to cast against WristUI button meshes.
+   * We use the right controller so the user can tap their left wrist with right hand.
+   */
+  private handleXRSelect(e: XRInputSourceEvent): void {
+    if (!this.wristUI?.isOpen) return;
+    // Only handle right-hand selects (the left hand holds the panel)
+    if (e.inputSource.handedness !== 'right') return;
+
+    const world = this.deps?.world;
+    if (!world) return;
+
+    // Use the right ray space's world-space position+direction
+    const rightRay = world.player.raySpaces.right;
+    this.raycaster.ray.origin.setFromMatrixPosition(rightRay.matrixWorld);
+    this.raycaster.ray.direction.set(0, 0, -1).transformDirection(rightRay.matrixWorld).normalize();
+
+    const hitMeshes = this.wristUI.getHitTestMeshes();
+    const objects = hitMeshes.map((h) => h.mesh);
+    const hits = this.raycaster.intersectObjects(objects, false);
+    if (hits.length > 0) {
+      const found = hitMeshes.find((h) => h.mesh === hits[0].object);
+      if (found) this.handleButtonAction(found.id);
     }
   }
 
   /**
-   * Attach ONE panel to left controller grip space (prefer left; NEVER two panels)
+   * Dispatches the action for the given button ID to the existing application systems.
    */
-  private attachToController(): void {
-    const player = (this.world as any)?.player;
-    if (!player || !player.gripSpaces) return;
+  private handleButtonAction(id: 'playPause' | 'restart' | 'close'): void {
+    const deps = this.deps;
+    if (!deps) return;
 
-    // Prefer left controller grip space; fallback to right only if left missing
-    const targetGrip = player.gripSpaces.left || player.gripSpaces.right;
-    if (!targetGrip) return;
-
-    if (this.currentParent === targetGrip && this.isAttachedToController) {
-      return;
-    }
-
-    // Detach from previous parent
-    if (this.currentParent) {
-      this.currentParent.remove(this.wristUI.group);
-      if (this.activationHitbox) {
-        this.currentParent.remove(this.activationHitbox);
+    switch (id) {
+      case 'playPause': {
+        if (deps.audio.isPlaying()) {
+          deps.audio.pause();
+        } else {
+          // Resume AudioContext if suspended (required on first gesture)
+          deps.audio.resume();
+          deps.audio.play().catch((err: unknown) => {
+            console.warn('[WristUIController] play() failed:', err);
+          });
+        }
+        break;
       }
-    }
-
-    // Attach to controller grip group
-    targetGrip.add(this.wristUI.group);
-    if (this.activationHitbox) {
-      targetGrip.add(this.activationHitbox);
-    }
-    this.currentParent = targetGrip;
-    this.isAttachedToController = true;
-
-    // Position naturally on the dorsal/inner wrist facing the user
-    this.wristUI.group.position.set(0.02, 0.05, -0.06);
-    this.wristUI.group.rotation.set(-Math.PI * 0.35, Math.PI * 0.25, -Math.PI * 0.15);
-
-    // Hitbox positioned on the wrist joint
-    if (this.activationHitbox) {
-      this.activationHitbox.position.set(0.02, 0.03, -0.04);
-    }
-
-    console.log('[WristUIController] Attached panel to controller grip group');
-  }
-
-  /**
-   * Attach panel ~0.6 m in front of camera for Desktop Fallback
-   */
-  private attachToDesktopCamera(): void {
-    const cam = this.camera || this.world?.camera;
-    if (!cam) return;
-
-    if (this.currentParent === cam && !this.isAttachedToController) {
-      return;
-    }
-
-    // Detach from previous parent
-    if (this.currentParent) {
-      this.currentParent.remove(this.wristUI.group);
-      if (this.activationHitbox) {
-        this.currentParent.remove(this.activationHitbox);
+      case 'restart': {
+        deps.replay();
+        break;
+      }
+      case 'close': {
+        this.wristUI?.close();
+        break;
       }
     }
-
-    // Position ~0.6 m in front of camera, slightly below line of sight
-    cam.add(this.wristUI.group);
-    this.currentParent = cam;
-    this.isAttachedToController = false;
-
-    this.wristUI.group.position.set(0.0, -0.06, -WRIST_UI_DIMENSIONS.desktopDistance);
-    this.wristUI.group.rotation.set(0, 0, 0);
-
-    console.log('[WristUIController] Attached panel ~0.6m in front of Desktop camera');
   }
 
-  /**
-   * Update called every frame from the render loop
-   */
-  update(dtSec: number): void {
-    // 1. Update procedural panel animation and canvas
-    this.wristUI.update(dtSec);
-
-    // 2. Check XR controller proximity poke if in XR mode
-    if (this.isXRMode && this.isAttachedToController) {
-      this.checkXRPoke();
-    }
-  }
+  // ─── DOM toggle button ─────────────────────────────────────────────────────
 
   /**
-   * Check poke interactions using emulated or physical controllers
+   * Creates a small, elegant glassmorphic DOM button in the corner for desktop mode
    */
-  private checkXRPoke(): void {
-    const player = (this.world as any)?.player;
-    if (!player) return;
-
-    // Right index tip space or right grip space pokes left wrist
-    const rightTip = player.indexTipSpaces?.right || player.gripSpaces?.right;
-    if (!rightTip || !this.activationHitbox) return;
-
-    this.activationHitbox.getWorldPosition(this.hitboxWorldPos);
-    rightTip.getWorldPosition(this.indexTipWorldPos);
-
-    const dist = this.hitboxWorldPos.distanceTo(this.indexTipWorldPos);
-
-    // If within ~0.12 m hitbox threshold and closed, trigger open
-    const threshold = WRIST_UI_DIMENSIONS.activationHitboxDiameter;
-    if (dist <= threshold && this.wristUI.state === WristUIState.CLOSED) {
-      this.wristUI.open();
-    }
-  }
-
-  /**
-   * Desktop click hit testing.
-   * @returns true if the click intersected and was handled by the Wrist UI panel.
-   */
-  handleDesktopPointer(clientX: number, clientY: number): boolean {
-    if (!this.wristUI.isOpen || !this.camera || !this.wristUI.mesh) {
-      return false;
-    }
-
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    this.pointerCoords.x = (clientX / w) * 2 - 1;
-    this.pointerCoords.y = -(clientY / h) * 2 + 1;
-
-    this.raycaster.setFromCamera(this.pointerCoords, this.camera);
-    const intersects = this.raycaster.intersectObject(this.wristUI.mesh, false);
-
-    if (intersects.length > 0) {
-      const hit = intersects[0];
-      if (hit.uv) {
-        return this.wristUI.handleUVClick(hit.uv);
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Creates minimal elegant desktop DOM toggle button
-   */
-  private createDesktopToggleButton(): void {
+  private setupDesktopDOMButton(): void {
     const btn = document.createElement('button');
-    btn.id = 'wrist-ui-toggle-btn';
+    btn.id = 'wrist-ui-desktop-btn';
     btn.setAttribute('aria-label', 'Toggle Wrist Control Panel');
     btn.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
-        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
-        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
-      </svg>
-      <span>Controls</span>
-      <kbd style="margin-left: 8px; font-size: 11px; padding: 2px 6px; background: rgba(255,255,255,0.18); border-radius: 4px; border: 1px solid rgba(255,255,255,0.25);">Tab</kbd>
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">Controls</span>
+      <kbd style="margin-left: 8px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.25);">Tab</kbd>
     `;
 
     Object.assign(btn.style, {
       position: 'fixed',
       bottom: '24px',
       left: '24px',
-      zIndex: '1000',
+      zIndex: '999',
       display: 'flex',
       alignItems: 'center',
-      padding: '10px 16px',
+      padding: '8px 16px',
       borderRadius: '24px',
-      background: 'rgba(30, 26, 48, 0.85)',
+      background: 'rgba(26, 22, 43, 0.85)',
       backdropFilter: 'blur(10px)',
-      color: '#fdfbf7',
+      color: '#fffbeb',
       border: '1px solid rgba(196, 181, 253, 0.45)',
-      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.35)',
+      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       fontSize: '13px',
       fontWeight: '600',
@@ -298,37 +324,86 @@ export class WristUIController {
     });
 
     btn.addEventListener('mouseleave', () => {
-      btn.style.background = 'rgba(30, 26, 48, 0.85)';
+      btn.style.background = 'rgba(26, 22, 43, 0.85)';
       btn.style.borderColor = 'rgba(196, 181, 253, 0.45)';
       btn.style.transform = 'translateY(0)';
     });
 
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.wristUI.toggle();
+      this.wristUI?.toggle();
     });
 
     document.body.appendChild(btn);
     this.domToggleButton = btn;
   }
 
+  // ─── Per-frame update ──────────────────────────────────────────────────────
+
+  /**
+   * Called every frame from ExperienceApp.update().
+   * Drives WristUI animation and live-updates progress display.
+   */
+  update(dt: number): void {
+    if (!this.wristUI || !this.deps) return;
+
+    // Advance open/close animation
+    this.wristUI.update(dt);
+
+    // Live-update PROGRESS bar from audio time (only when panel is visible)
+    if (this.wristUI.isOpen) {
+      const { sourceStart, duration } = this.deps.excerpt;
+      const rawTime = this.deps.audio.getCurrentTime();
+      const pct = duration > 0 ? Math.max(0, Math.min(1, (rawTime - sourceStart) / duration)) : 0;
+      this.wristUI.updateProgress(pct);
+    }
+  }
+
+  // ─── Cleanup ───────────────────────────────────────────────────────────────
+
   dispose(): void {
-    if (this.currentParent) {
-      this.currentParent.remove(this.wristUI.group);
-      if (this.activationHitbox) {
-        this.currentParent.remove(this.activationHitbox);
-      }
+    if (this.boundOnKeyDown) {
+      window.removeEventListener('keydown', this.boundOnKeyDown);
+      this.boundOnKeyDown = null;
     }
-    if (this.activationHitbox) {
-      this.activationHitbox.geometry.dispose();
-      (this.activationHitbox.material as MeshBasicMaterial).dispose();
-      this.activationHitbox = null;
+
+    if (this.boundOnPointerDown) {
+      window.removeEventListener('pointerdown', this.boundOnPointerDown);
+      this.boundOnPointerDown = null;
     }
+
+    if (this.xrSession && this.boundOnXRSelect) {
+      this.xrSession.removeEventListener('selectstart', this.boundOnXRSelect);
+      this.boundOnXRSelect = null;
+      this.xrSession = null;
+    }
+
     if (this.domToggleButton && this.domToggleButton.parentElement) {
       this.domToggleButton.parentElement.removeChild(this.domToggleButton);
       this.domToggleButton = null;
     }
-    this.wristUI.dispose();
+
+    if (this.unsubscribeXR) {
+      this.unsubscribeXR();
+      this.unsubscribeXR = null;
+    }
+
+    if (this.unsubscribePhase) {
+      this.unsubscribePhase();
+      this.unsubscribePhase = null;
+    }
+
+    if (this.currentParent) {
+      this.currentParent.remove(this.rootGroup);
+      this.currentParent = null;
+    }
+
+    if (this.wristUI) {
+      this.wristUI.dispose();
+      this.wristUI = null;
+    }
+
+    this.deps = null;
   }
 }
 

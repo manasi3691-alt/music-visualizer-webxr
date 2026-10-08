@@ -16,6 +16,7 @@ import { xrSetup } from '../xr/XRSetup.js';
 import { xrState } from '../xr/XRState.js';
 import { detectQualityProfile } from '../performance/QualityProfile.js';
 import { wristUIController } from '../ui/WristUIController.js';
+import { musicExcerpt } from '../audio/MusicExcerpt.js';
 
 export let experienceWorld: ExperienceWorld | null = null;
 
@@ -61,6 +62,30 @@ export class ExperienceApp {
     // 4. Create UI Overlays
     this.createUI();
 
+    // 4.5 Initialize Wrist UI Controller
+    wristUIController.init({
+      audio: {
+        play: () => audioEngine.play(),
+        resume: () => audioEngine.resume(),
+        pause: () => audioEngine.pause(),
+        getCurrentTime: () => audioEngine.currentTime,
+        isPlaying: () => audioEngine.isPlaying,
+      },
+      excerpt: {
+        sourceStart: musicExcerpt.sourceStart,
+        sourceEnd: musicExcerpt.sourceEnd,
+        duration: musicExcerpt.duration,
+      },
+      state: {
+        getCurrentPhase: () => experienceState.phase,
+        subscribePhase: (listener) => experienceState.subscribePhase(listener),
+        subscribeXR: (listener) => experienceState.subscribeXR(listener),
+      },
+      replay: () => this.replay(),
+      world,
+      camera: world.camera,
+    });
+
     // 5. Load audio
     experienceState.setPhase('LOADING');
     try {
@@ -93,6 +118,12 @@ export class ExperienceApp {
     });
 
     console.log('[ExperienceApp] Initialized successfully');
+
+    // Desktop verification: dispatch Tab key after 1.5s to demonstrate open transition
+    setTimeout(() => {
+      console.log('[ExperienceApp] Dispatching Tab key to open Wrist UI...');
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Tab', bubbles: true }));
+    }, 1500);
   }
 
   /**
@@ -123,7 +154,10 @@ export class ExperienceApp {
       experienceWorld.update(frameData, metrics, deltaSec);
     }
 
-    // 5. Update debug overlay if visible
+    // 5. Update Wrist UI
+    wristUIController.update(deltaSec);
+
+    // 6. Update debug overlay if visible
     if (this.showDebug && this.debugOverlay) {
       this.updateDebugOverlay(frameData, metrics);
     }
