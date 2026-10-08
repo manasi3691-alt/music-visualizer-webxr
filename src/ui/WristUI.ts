@@ -1,6 +1,7 @@
 /**
  * WristUI: Procedural holographic control panel.
  * Task 3 — Open/close animation.
+ * Task 5 — Live data wiring: updateStatus(), updateProgress(), getHitTestMeshes().
  *
  * Requirements:
  * - Rounded rectangular panel (dimensions ~0.09 x 0.13 x 0.005 m, triangle count < 1500)
@@ -72,6 +73,16 @@ export class WristUI {
   private controls: Map<string, UIControlMesh> = new Map();
   private controlMaterials: { material: MeshPhysicalMaterial | MeshBasicMaterial; baseOpacity: number }[] = [];
 
+  // Live data caches to avoid redundant texture redraws
+  private _lastStatusLabel = '';
+  private _lastProgressPct = -1;
+
+  // Canvases for live-update controls (kept alive for texture redraw)
+  private statusCanvas: HTMLCanvasElement | null = null;
+  private statusTexture: CanvasTexture | null = null;
+  private progressCanvas: HTMLCanvasElement | null = null;
+  private progressTexture: CanvasTexture | null = null;
+
   // Disposables tracking for clean teardown
   private disposableGeometries: BufferGeometry[] = [];
   private disposableMaterials: (MeshPhysicalMaterial | MeshBasicMaterial | LineBasicMaterial)[] = [];
@@ -113,6 +124,106 @@ export class WristUI {
 
   getAllControls(): UIControlMesh[] {
     return Array.from(this.controls.values());
+  }
+
+  /**
+   * Returns the interactive button meshes for raycaster-based hit detection.
+   * Only PLAY/PAUSE, RESTART, and CLOSE are interactive.
+   * STATUS and PROGRESS are read-only indicators.
+   */
+  getHitTestMeshes(): { mesh: Mesh; id: 'playPause' | 'restart' | 'close' }[] {
+    const result: { mesh: Mesh; id: 'playPause' | 'restart' | 'close' }[] = [];
+    const ids = ['playPause', 'restart', 'close'] as const;
+    for (const id of ids) {
+      const ctrl = this.controls.get(id);
+      if (ctrl) result.push({ mesh: ctrl.mesh, id });
+    }
+    return result;
+  }
+
+  /**
+   * Live-updates the STATUS indicator canvas texture.
+   * Debounced: only redraws if the label has changed.
+   */
+  updateStatus(label: string): void {
+    if (label === this._lastStatusLabel) return;
+    this._lastStatusLabel = label;
+    if (!this.statusCanvas || !this.statusTexture) return;
+
+    const canvas = this.statusCanvas;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const cw = canvas.width;
+    const ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    ctx.fillStyle = 'rgba(167, 139, 250, 0.20)';
+    ctx.strokeStyle = 'rgba(196, 181, 253, 0.40)';
+    ctx.lineWidth = 2;
+    this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = WRIST_UI_PALETTE.hex.warmWhite;
+    ctx.font = '600 24px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`STATUS: ${label}`, cw / 2, ch / 2);
+
+    this.statusTexture.needsUpdate = true;
+  }
+
+  /**
+   * Live-updates the PROGRESS bar canvas texture.
+   * Debounced: only redraws when pct changes by ≥ 0.005 (0.5%).
+   * @param pct — 0.0 to 1.0
+   */
+  updateProgress(pct: number): void {
+    const clamped = Math.max(0, Math.min(1, pct));
+    if (Math.abs(clamped - this._lastProgressPct) < 0.005) return;
+    this._lastProgressPct = clamped;
+    if (!this.progressCanvas || !this.progressTexture) return;
+
+    const canvas = this.progressCanvas;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const cw = canvas.width;
+    const ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    // Background track
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.strokeStyle = 'rgba(196, 181, 253, 0.30)';
+    ctx.lineWidth = 2;
+    this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    // Progress fill bar
+    const trackPad = 8;
+    const trackH = ch * 0.3;
+    const trackY = ch * 0.55;
+    const trackW = cw - trackPad * 2;
+    ctx.fillStyle = WRIST_UI_PALETTE.hex.progressTrack;
+    this.roundRectCanvas(ctx, trackPad, trackY, trackW, trackH, 3);
+    ctx.fill();
+
+    if (clamped > 0.01) {
+      ctx.fillStyle = WRIST_UI_PALETTE.hex.progressFill;
+      this.roundRectCanvas(ctx, trackPad, trackY, trackW * clamped, trackH, 3);
+      ctx.fill();
+    }
+
+    const pctStr = `${Math.round(clamped * 100)}%`;
+    ctx.fillStyle = WRIST_UI_PALETTE.hex.textMuted;
+    ctx.font = '500 22px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(`PROGRESS: ${pctStr}`, cw / 2, trackY - 4);
+
+    this.progressTexture.needsUpdate = true;
   }
 
   /**
@@ -362,7 +473,7 @@ export class WristUI {
   }
 
   /**
-   * Control 3: STATUS Indicator (read-only)
+   * Control 3: STATUS Indicator (read-only, live-updatable)
    * Position: Top-left (x: -0.013, y: 0.046), Size: 0.054 x 0.018 m
    */
   private createStatusIndicator(zPos: number): void {
@@ -374,20 +485,29 @@ export class WristUI {
     const geom = new ShapeGeometry(shape, 6);
     this.disposableGeometries.push(geom);
 
-    const texture = this.createLabelTexture(256, 80, (ctx, cw, ch) => {
+    // Keep the canvas and texture alive so updateStatus() can redraw into them
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 80;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
       ctx.fillStyle = 'rgba(167, 139, 250, 0.20)';
       ctx.strokeStyle = 'rgba(196, 181, 253, 0.40)';
       ctx.lineWidth = 2;
-      this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 12);
+      this.roundRectCanvas(ctx, 4, 4, canvas.width - 8, canvas.height - 8, 12);
       ctx.fill();
       ctx.stroke();
-
       ctx.fillStyle = WRIST_UI_PALETTE.hex.warmWhite;
       ctx.font = '600 24px -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('STATUS: READY', cw / 2, ch / 2);
-    });
+      ctx.fillText('STATUS: READY', canvas.width / 2, canvas.height / 2);
+    }
+    const texture = new CanvasTexture(canvas);
+    texture.generateMipmaps = true;
+    this.statusCanvas = canvas;
+    this.statusTexture = texture;
+    this.disposableTextures.push(texture);
 
     const mat = new MeshBasicMaterial({
       map: texture,
@@ -452,7 +572,7 @@ export class WristUI {
   }
 
   /**
-   * Control 4: PROGRESS Bar (read-only indicator)
+   * Control 4: PROGRESS Bar (read-only, live-updatable)
    * Position: Middle-upper (x: 0, y: 0.020), Size: 0.076 x 0.018 m
    */
   private createProgressBar(zPos: number): void {
@@ -464,22 +584,29 @@ export class WristUI {
     const geom = new ShapeGeometry(shape, 6);
     this.disposableGeometries.push(geom);
 
-    const texture = this.createLabelTexture(360, 80, (ctx, cw, ch) => {
-      // Background track
+    // Keep canvas alive so updateProgress() can redraw into it
+    const canvas = document.createElement('canvas');
+    canvas.width = 360;
+    canvas.height = 80;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
       ctx.strokeStyle = 'rgba(196, 181, 253, 0.30)';
       ctx.lineWidth = 2;
-      this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 12);
+      this.roundRectCanvas(ctx, 4, 4, canvas.width - 8, canvas.height - 8, 12);
       ctx.fill();
       ctx.stroke();
-
-      // Placeholder progress fill (e.g. 0% initially)
       ctx.fillStyle = WRIST_UI_PALETTE.hex.textMuted;
       ctx.font = '500 22px -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('PROGRESS: 0%', cw / 2, ch / 2);
-    });
+      ctx.fillText('PROGRESS: 0%', canvas.width / 2, canvas.height / 2);
+    }
+    const texture = new CanvasTexture(canvas);
+    texture.generateMipmaps = true;
+    this.progressCanvas = canvas;
+    this.progressTexture = texture;
+    this.disposableTextures.push(texture);
 
     const mat = new MeshBasicMaterial({
       map: texture,
@@ -648,5 +775,9 @@ export class WristUI {
     this.borderLine = null;
     this.gradientOverlay = null;
     this.gradientMaterial = null;
+    this.statusCanvas = null;
+    this.statusTexture = null;
+    this.progressCanvas = null;
+    this.progressTexture = null;
   }
 }
