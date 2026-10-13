@@ -57,8 +57,6 @@ export class ExperienceApp {
       }
     });
 
-    // 2b. Setup Wrist UI controller (XR and Desktop fallback)
-    wristUIController.init(world);
 
     // 3. Setup Desktop Fallback input
     const canvas = document.querySelector('canvas') || (document.getElementById('scene-container') as HTMLElement);

@@ -7,11 +7,8 @@
 import { Vector3, Raycaster, Camera, Object3D } from '@iwsdk/core';
 import { interactionRegistry } from '../interaction/InteractionRegistry.js';
 import { ScaleElement } from '../interaction/ScaleElement.js';
-<<<<<<< HEAD
 import { experienceWorld } from '../app/ExperienceApp.js';
-=======
-import { wristUIController } from '../ui/WristUIController.js';
->>>>>>> 905ab8e2c33267bcf9bddbc254f2db58b0faf179
+
 
 export class DesktopInput {
   private camera: Camera | null = null;
@@ -75,10 +72,7 @@ export class DesktopInput {
 
     if (!this.domElement || !this.camera) return;
 
-    // Check if click was handled by Wrist UI panel
-    if (wristUIController.isOpen && wristUIController.handleDesktopPointer(e.clientX, e.clientY)) {
-      return;
-    }
+
 
     const rect = this.domElement.getBoundingClientRect();
     this.mouseVec.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
