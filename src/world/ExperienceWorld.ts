@@ -11,6 +11,7 @@ import { Structures } from './Structures.js';
 import { Waves } from './Waves.js';
 import { Particles } from './Particles.js';
 import { LightingSystem } from './LightingSystem.js';
+import { CitySystem } from '../city/CitySystem.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
@@ -23,6 +24,7 @@ export class ExperienceWorld {
   readonly waves: Waves;
   readonly particles: Particles;
   readonly lighting: LightingSystem;
+  readonly citySystem: CitySystem;
 
   private waveOrigin = new Vector3(0, 1.1, -1.0);
 
@@ -33,10 +35,12 @@ export class ExperienceWorld {
     this.waves = new Waves();
     this.particles = new Particles(isQuest);
     this.lighting = new LightingSystem();
+    this.citySystem = new CitySystem(isQuest);
 
     // Assemble single persistent scene graph
     this.rootGroup.add(this.atmosphere.group);
     this.rootGroup.add(this.lighting.group);
+    this.rootGroup.add(this.citySystem.group);
     this.rootGroup.add(this.structures.group);
     this.rootGroup.add(this.organicForms.group);
     this.rootGroup.add(this.particles.group);
@@ -57,6 +61,9 @@ export class ExperienceWorld {
    */
   handleGrab(dx: number, dy: number, dz: number): void {
     this.structures.setGrabDisplacement(dx, dy, dz);
+    if (this.citySystem.interaction.isGrabbing()) {
+      this.citySystem.interaction.updateGrab(new Vector3(dx, dy, dz));
+    }
   }
 
   /**
@@ -64,6 +71,9 @@ export class ExperienceWorld {
    */
   handleGrabRelease(): void {
     this.structures.resetGrabDisplacement();
+    if (this.citySystem.interaction.isGrabbing()) {
+      this.citySystem.interaction.endGrab();
+    }
     this.waves.emitWave(this.structures.grabOrbMesh.position, 4.0, 2.5);
   }
 
@@ -75,22 +85,31 @@ export class ExperienceWorld {
     this.lighting.update(frameData, metrics);
     this.atmosphere.update(frameData, metrics);
 
-    // 2. Primary & secondary geometry
+    // 2. City procedural evolution (music-driven)
+    this.citySystem.update(frameData, metrics, deltaSec);
+
+    // 3. Primary & secondary geometry
     this.organicForms.update(frameData, metrics, deltaSec);
     this.structures.update(frameData, metrics, deltaSec);
 
-    // 3. Dynamic effects: particles & waves
+    // 4. Dynamic effects: particles & waves
     this.particles.update(frameData, metrics, deltaSec);
     this.waves.update(frameData, metrics, deltaSec);
+  }
+
+  reset(): void {
+    this.citySystem.reset();
   }
 
   dispose(): void {
     this.atmosphere.dispose();
     this.organicForms.dispose();
     this.structures.dispose();
+    this.citySystem.dispose();
     this.waves.dispose();
     this.particles.dispose();
     this.lighting.dispose();
     this.rootGroup.clear();
   }
 }
+

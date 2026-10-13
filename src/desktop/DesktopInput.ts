@@ -7,12 +7,15 @@
 import { Vector3, Raycaster, Camera, Object3D } from '@iwsdk/core';
 import { interactionRegistry } from '../interaction/InteractionRegistry.js';
 import { ScaleElement } from '../interaction/ScaleElement.js';
+import { experienceWorld } from '../app/ExperienceApp.js';
 
 export class DesktopInput {
   private camera: Camera | null = null;
   private domElement: HTMLElement | null = null;
   private isPointerDown = false;
   private isDraggingGrab = false;
+  private isDraggingCityBlock = false;
+  private cityDragCumulative = new Vector3();
   private lastMouseX = 0;
   private lastMouseY = 0;
 
@@ -72,6 +75,17 @@ export class DesktopInput {
     this.mouseVec.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouseVec.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
+    // Check if user clicked an interactive city building block
+    if (experienceWorld?.citySystem) {
+      const hitBlock = experienceWorld.citySystem.interaction.hitTest(this.camera, this.mouseVec);
+      if (hitBlock) {
+        this.isDraggingCityBlock = true;
+        this.cityDragCumulative.set(0, 0, 0);
+        experienceWorld.citySystem.interaction.startGrab(hitBlock.id, hitBlock.group.position);
+        return;
+      }
+    }
+
     // Trigger touch ripple on forward click
     if (interactionRegistry.isTouchAvailable()) {
       interactionRegistry.onTouch('primary-ribbon');
@@ -84,14 +98,32 @@ export class DesktopInput {
   }
 
   private onMouseMove(e: MouseEvent): void {
-    if (!this.isPointerDown) return;
+    if (!this.domElement || !this.camera) return;
+
+    const rect = this.domElement.getBoundingClientRect();
+    this.mouseVec.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouseVec.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+    if (!this.isPointerDown) {
+      // Hover test for interactive city blocks
+      if (experienceWorld?.citySystem) {
+        const hovered = experienceWorld.citySystem.interaction.hitTest(this.camera, this.mouseVec);
+        experienceWorld.citySystem.interaction.setHoveredBlock(hovered);
+      }
+      return;
+    }
 
     const deltaX = e.clientX - this.lastMouseX;
     const deltaY = e.clientY - this.lastMouseY;
     this.lastMouseX = e.clientX;
     this.lastMouseY = e.clientY;
 
-    if (this.isDraggingGrab) {
+    if (this.isDraggingCityBlock && experienceWorld?.citySystem) {
+      // Map mouse drag to world-space displacement vector for the city block
+      this.cityDragCumulative.x += deltaX * 0.0025;
+      this.cityDragCumulative.y -= deltaY * 0.0025;
+      experienceWorld.citySystem.interaction.updateGrab(this.cityDragCumulative);
+    } else if (this.isDraggingGrab) {
       // Map mouse drag to grab displacement
       const dummyControllerPos = new Vector3(
         deltaX * 0.002,
@@ -115,6 +147,10 @@ export class DesktopInput {
 
   private onMouseUp(): void {
     this.isPointerDown = false;
+    if (this.isDraggingCityBlock && experienceWorld?.citySystem) {
+      this.isDraggingCityBlock = false;
+      experienceWorld.citySystem.interaction.endGrab();
+    }
     if (this.isDraggingGrab) {
       this.isDraggingGrab = false;
       interactionRegistry.onGrabEnd();
@@ -130,3 +166,4 @@ export class DesktopInput {
 }
 
 export const desktopInput = new DesktopInput();
+
