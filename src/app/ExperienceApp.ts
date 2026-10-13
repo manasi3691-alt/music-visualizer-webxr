@@ -13,10 +13,11 @@ import { interactionRegistry } from '../interaction/InteractionRegistry.js';
 import { desktopInput } from '../desktop/DesktopInput.js';
 import { performanceMonitor } from '../performance/PerformanceMonitor.js';
 import { xrSetup } from '../xr/XRSetup.js';
-import { xrState } from '../xr/XRState.js';
 import { detectQualityProfile } from '../performance/QualityProfile.js';
 import { wristUIController } from '../ui/WristUIController.js';
 import { musicExcerpt } from '../audio/MusicExcerpt.js';
+import { cityXRInput } from '../city/CityXRInput.js';
+import { interactionDebugState } from '../interaction/InteractionDebugState.js';
 
 export let experienceWorld: ExperienceWorld | null = null;
 
@@ -46,9 +47,16 @@ export class ExperienceApp {
 
     // 2. Setup XR integration
     xrSetup.init(world);
+    cityXRInput.init(world, experienceWorld.citySystem.interaction);
 
-    // 2b. Setup Wrist UI controller (XR and Desktop fallback)
-    wristUIController.init(world);
+    experienceState.subscribeXR((xrState) => {
+      if (xrState === 'ACTIVE' && world.session) {
+        cityXRInput.onXRActive(world.session);
+      } else if (xrState === 'ENDED' || xrState === 'NONE') {
+        cityXRInput.onXREnded();
+      }
+    });
+
 
     // 3. Setup Desktop Fallback input
     const canvas = document.querySelector('canvas') || (document.getElementById('scene-container') as HTMLElement);
@@ -98,6 +106,14 @@ export class ExperienceApp {
 
     // 6. Listen for state changes
     experienceState.subscribePhase((phase) => this.onPhaseChanged(phase));
+
+    // Auto-enable debug overlay if ?debug=1 is present in the URL
+    if (window.location.search.includes('debug=1')) {
+      this.showDebug = true;
+      if (this.debugOverlay) {
+        this.debugOverlay.style.display = 'block';
+      }
+    }
 
     // 7. Keyboard shortcuts (Space = Play/Pause, R = Replay, D = Debug)
     window.addEventListener('keydown', (e) => {
@@ -157,6 +173,9 @@ export class ExperienceApp {
     // 5. Update Wrist UI
     wristUIController.update(deltaSec);
 
+    // 5.5 Update City XR Controller input
+    cityXRInput.update(deltaSec);
+
     // 6. Update debug overlay if visible
     if (this.showDebug && this.debugOverlay) {
       this.updateDebugOverlay(frameData, metrics);
@@ -177,6 +196,7 @@ export class ExperienceApp {
   replay(): void {
     musicalConductor.reset();
     interactionRegistry.reset();
+    experienceWorld?.reset();
     audioEngine.replay();
   }
 
@@ -234,8 +254,6 @@ export class ExperienceApp {
 
   private renderStartUI(): void {
     if (!this.uiContainer) return;
-    const isXR = xrState.isSupported;
-
     this.uiContainer.innerHTML = `
       <div style="max-width: 480px; padding: 32px; background: rgba(255, 255, 255, 0.04); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(16px); box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
         <h1 style="font-size: 40px; font-weight: 300; letter-spacing: 6px; margin: 0 0 8px 0; color: #f0f4ff; text-transform: uppercase;">EXPERIENCE</h1>
@@ -308,6 +326,10 @@ export class ExperienceApp {
   }
 
   private toggleDebug(): void {
+    const isDev = import.meta.env.DEV;
+    const hasQuery = window.location.search.includes('debug=1');
+    if (!isDev && !hasQuery) return;
+
     this.showDebug = !this.showDebug;
     if (this.debugOverlay) {
       this.debugOverlay.style.display = this.showDebug ? 'block' : 'none';
@@ -316,17 +338,26 @@ export class ExperienceApp {
 
   private updateDebugOverlay(frameData: any, metrics: any): void {
     if (!this.debugOverlay) return;
+    const dbg = interactionDebugState.data;
+
     this.debugOverlay.innerHTML = `
-      <b>EXPERIENCE DEBUG [D]</b><br/>
+      <b>EXPERIENCE INTERACTION DEBUG [D]</b><br/>
       FPS: ${performanceMonitor.getFPS()} (${performanceMonitor.getFrameTimeMs().toFixed(1)}ms)<br/>
-      Audio time: ${audioEngine.currentTime.toFixed(2)}s / 278.00s<br/>
-      Rel time: ${frameData.relativeTime.toFixed(2)}s / 38.00s (${(frameData.normalizedProgress * 100).toFixed(1)}%)<br/>
-      Cue: ${frameData.activeCue.id} (${frameData.activeCue.event})<br/>
-      Phase: ${experienceState.phase} | XR: ${experienceState.xrState}<br/>
-      FFT: L:${metrics.low.toFixed(2)} M:${metrics.mid.toFixed(2)} H:${metrics.high.toFixed(2)} RMS:${metrics.overall.toFixed(2)}<br/>
-      Interactions: Touch:${interactionRegistry.isTouchAvailable()} Grab:${interactionRegistry.isGrabAvailable()} Pull:${interactionRegistry.isPullScaleAvailable()}
+      Audio time: ${audioEngine.currentTime.toFixed(2)}s / 278.00s | Rel: ${frameData.relativeTime.toFixed(2)}s (${(frameData.normalizedProgress * 100).toFixed(1)}%)<br/>
+      Cue: ${frameData.activeCue.id} (${frameData.activeCue.event}) | Phase: ${experienceState.phase}<br/>
+      <hr style="border:0; border-top:1px solid #446; margin:4px 0;"/>
+      <b>XR Session:</b> ${dbg.xrActive ? '<span style="color:#4f8;">ACTIVE</span>' : '<span style="color:#aaa;">NO</span>'} | Left: ${dbg.leftControllerDetected ? 'YES' : 'NO'} | Right: ${dbg.rightControllerDetected ? 'YES' : 'NO'}<br/>
+      <b>Last Input Event:</b> ${dbg.lastInputEvent} (${dbg.lastEventSource})<br/>
+      <b>Targeted Block:</b> ${dbg.currentlyTargetedBlock}<br/>
+      <b>Block Grabbed:</b> ${dbg.blockGrabbed ? `<span style="color:#fa0;">YES (${dbg.grabbedBlockId})</span>` : 'NO'}<br/>
+      <b>Last Release:</b> ${dbg.lastReleaseEvent}<br/>
+      <hr style="border:0; border-top:1px solid #446; margin:4px 0;"/>
+      <b>Wrist Poke Sphere:</b> ${dbg.wristActivationZoneExists ? '<span style="color:#4f8;">EXISTS</span>' : 'NO'} | Poke Detected: ${dbg.lastWristPokeDetected ? 'YES' : 'NO'}<br/>
+      <b>Wrist Menu Open:</b> ${dbg.wristMenuOpen ? '<span style="color:#c8f;">OPEN</span>' : 'CLOSED'}<br/>
+      <b>Errors:</b> ${dbg.lastError}
     `;
   }
+
 }
 
 export const experienceApp = new ExperienceApp();

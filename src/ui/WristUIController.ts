@@ -5,11 +5,13 @@
  * Task 6 — XR wrist mounting: left grip space when XR active, camera when desktop.
  */
 
-import { Group, Camera, Raycaster, Vector2 } from '@iwsdk/core';
+import { Group, Camera, Raycaster, Vector2, Vector3, Mesh, SphereGeometry, MeshBasicMaterial } from '@iwsdk/core';
 import type { World } from '@iwsdk/core';
 import { WristUI } from './WristUI.js';
-import { WRIST_UI_DIMENSIONS } from './WristUIStyles.js';
+import { WRIST_UI_DIMENSIONS, WRIST_UI_PALETTE } from './WristUIStyles.js';
 import { ExperiencePhase, XRLifecycleState } from '../app/ExperienceState.js';
+import { interactionDebugState } from '../interaction/InteractionDebugState.js';
+import { cityXRInput } from '../city/CityXRInput.js';
 
 export interface WristUIDependencies {
   audio: {
@@ -43,6 +45,14 @@ export class WristUIController {
   private currentParent: Camera | Group | null = null;
   private isXRActive = false;
 
+  // XR Poke Activation Area
+  private pokeAnchorMesh: Mesh | null = null;
+  private pokeAnchorRadius = 0.055; // 5.5 cm radius activation zone
+  private pokeCooldownRemaining = 0; // Cooldown timer (300-500ms)
+  private wasInsidePokeZone = false;
+  private scratchWristWorldPos = new Vector3();
+  private scratchPokingWorldPos = new Vector3();
+
   // Desktop integration handles
   private domToggleButton: HTMLButtonElement | null = null;
   private boundOnKeyDown: ((e: KeyboardEvent) => void) | null = null;
@@ -57,6 +67,7 @@ export class WristUIController {
   // XR select listener reference
   private boundOnXRSelect: ((e: Event) => void) | null = null;
   private xrSession: XRSession | null = null;
+
 
   init(deps: WristUIDependencies): void {
     this.deps = deps;
@@ -127,7 +138,30 @@ export class WristUIController {
       // Position panel on inner-wrist face, rotated to face the user when palm is up
       this.rootGroup.position.set(0, WRIST_UI_DIMENSIONS.wristOffset, 0);
       this.rootGroup.rotation.set(-Math.PI * 0.5, 0, 0);
+
+      // Create a subtle holographic poke activation sphere at the wrist anchor
+      if (!this.pokeAnchorMesh) {
+        const sphereGeo = new SphereGeometry(this.pokeAnchorRadius, 16, 16);
+        const sphereMat = new MeshBasicMaterial({
+          color: WRIST_UI_PALETTE.borderEmissive,
+          wireframe: true,
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+        });
+        this.pokeAnchorMesh = new Mesh(sphereGeo, sphereMat);
+        this.pokeAnchorMesh.name = 'wrist-poke-anchor';
+        // Position at the base of the wrist
+        this.pokeAnchorMesh.position.set(0, 0.04, 0);
+        leftGrip.add(this.pokeAnchorMesh);
+      } else {
+        leftGrip.add(this.pokeAnchorMesh);
+      }
     }
+
+    interactionDebugState.set({
+      wristActivationZoneExists: true,
+    });
 
     // Register XR select handler on the session
     const session = this.deps?.world?.session;
@@ -137,7 +171,7 @@ export class WristUIController {
       this.xrSession = session;
     }
 
-    console.log('[WristUIController] XR active — panel mounted to left wrist grip');
+    console.log('[WristUIController] XR active — panel & poke sphere mounted to left wrist grip');
   }
 
   /**
@@ -146,6 +180,16 @@ export class WristUIController {
    */
   private onXREnded(): void {
     this.isXRActive = false;
+
+    // Remove poke anchor sphere
+    if (this.pokeAnchorMesh && this.pokeAnchorMesh.parent) {
+      this.pokeAnchorMesh.parent.remove(this.pokeAnchorMesh);
+    }
+
+    interactionDebugState.set({
+      wristActivationZoneExists: false,
+      lastWristPokeDetected: false,
+    });
 
     // Unregister XR select listener
     if (this.xrSession && this.boundOnXRSelect) {
@@ -338,12 +382,6 @@ export class WristUIController {
     this.domToggleButton = btn;
   }
 
-  // ─── Per-frame update ──────────────────────────────────────────────────────
-
-  /**
-   * Called every frame from ExperienceApp.update().
-   * Drives WristUI animation and live-updates progress display.
-   */
   update(dt: number): void {
     if (!this.wristUI || !this.deps) return;
 
@@ -357,7 +395,61 @@ export class WristUIController {
       const pct = duration > 0 ? Math.max(0, Math.min(1, (rawTime - sourceStart) / duration)) : 0;
       this.wristUI.updateProgress(pct);
     }
+
+    // XR Wrist Poke Detection
+    if (this.isXRActive && this.deps.world && this.pokeAnchorMesh) {
+      if (this.pokeCooldownRemaining > 0) {
+        this.pokeCooldownRemaining -= dt;
+      }
+
+      // Never trigger wrist menu if user is actively grabbing a building block
+      if (cityXRInput && (cityXRInput as any).activeGrabbedBlock) {
+        return;
+      }
+
+      const world = this.deps.world;
+      const leftGrip = world.player.gripSpaces.left;
+      const rightGrip = world.player.gripSpaces.right;
+
+      // Ensure both controllers are active
+      if (leftGrip.matrixWorld.elements[15] > 0 && rightGrip.matrixWorld.elements[15] > 0) {
+        this.scratchWristWorldPos.setFromMatrixPosition(this.pokeAnchorMesh.matrixWorld);
+        this.scratchPokingWorldPos.setFromMatrixPosition(rightGrip.matrixWorld);
+
+        const dist = this.scratchPokingWorldPos.distanceTo(this.scratchWristWorldPos);
+        const isInside = dist <= this.pokeAnchorRadius;
+
+        if (isInside) {
+          if (!this.wasInsidePokeZone && this.pokeCooldownRemaining <= 0) {
+            this.wasInsidePokeZone = true;
+            this.pokeCooldownRemaining = 0.40; // 400ms cooldown
+
+            // Toggle menu open/close
+            this.wristUI.toggle();
+            const isOpenNow = this.wristUI.isOpen;
+
+            interactionDebugState.set({
+              lastWristPokeDetected: true,
+              wristMenuOpen: isOpenNow,
+            });
+            interactionDebugState.logEvent(isOpenNow ? 'poke-open' : 'poke-close', 'right-controller');
+
+            // Pulse anchor mesh opacity as visual feedback
+            if (this.pokeAnchorMesh.material && 'opacity' in this.pokeAnchorMesh.material) {
+              (this.pokeAnchorMesh.material as any).opacity = 0.9;
+            }
+          }
+        } else {
+          // Controller exited activation sphere, ready for next poke
+          this.wasInsidePokeZone = false;
+          if (this.pokeAnchorMesh.material && 'opacity' in this.pokeAnchorMesh.material) {
+            (this.pokeAnchorMesh.material as any).opacity = 0.35;
+          }
+        }
+      }
+    }
   }
+
 
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
