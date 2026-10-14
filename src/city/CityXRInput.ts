@@ -9,6 +9,7 @@ import type { World } from '@iwsdk/core';
 import { CityInteraction } from './CityInteraction.js';
 import { CityBlock } from './CityBlock.js';
 import { interactionDebugState } from '../interaction/InteractionDebugState.js';
+import { experienceWorld } from '../app/ExperienceApp.js';
 
 export class CityXRInput {
   private world: World | null = null;
@@ -121,6 +122,20 @@ export class CityXRInput {
       return;
     }
 
+    // 1.5 If currently grabbing a planet in the SolarSystem
+    if (experienceWorld?.solarSystem) {
+      if (experienceWorld.solarSystem.isHoldingPlanet('left') && hasLeft) {
+        this.controllerWorldPos.setFromMatrixPosition(leftGrip.matrixWorld);
+        const headPos = this.world.camera ? this.world.camera.getWorldPosition(new Vector3()) : undefined;
+        experienceWorld.solarSystem.handleGrabUpdate('left', this.controllerWorldPos, headPos);
+      }
+      if (experienceWorld.solarSystem.isHoldingPlanet('right') && hasRight) {
+        this.controllerWorldPos.setFromMatrixPosition(rightGrip.matrixWorld);
+        const headPos = this.world.camera ? this.world.camera.getWorldPosition(new Vector3()) : undefined;
+        experienceWorld.solarSystem.handleGrabUpdate('right', this.controllerWorldPos, headPos);
+      }
+    }
+
     // 2. Otherwise, perform targeting/hover detection using controller ray or proximity
     // Check right controller first (preferred dominant hand), then left controller
     let targetedBlock: CityBlock | null = null;
@@ -143,7 +158,7 @@ export class CityXRInput {
     const availableBlocks = this.interaction.getAvailableBlocks();
     if (availableBlocks.length === 0) return null;
 
-    // A. Proximity check first: is controller within 0.35m of block?
+    // A. Proximity check first: is controller within 0.38m of block?
     this.controllerWorldPos.setFromMatrixPosition(gripSpace.matrixWorld);
     for (const block of availableBlocks) {
       const dist = this.controllerWorldPos.distanceTo(block.group.position);
@@ -174,11 +189,26 @@ export class CityXRInput {
     const handedness = (e.inputSource.handedness as 'left' | 'right') || 'right';
     interactionDebugState.logEvent(`${eventType}Start (${handedness})`, 'XRInput');
 
-    // If already grabbing, ignore additional presses
-    if (this._activeGrabbedBlock) return;
-
     const grip = handedness === 'left' ? this.world.player.gripSpaces.left : this.world.player.gripSpaces.right;
     const ray = handedness === 'left' ? this.world.player.raySpaces.left : this.world.player.raySpaces.right;
+
+    // Check SolarSystem planet interaction first if SolarSystem is active
+    if (experienceWorld?.solarSystem?.group.visible) {
+      this.rayOrigin.setFromMatrixPosition(ray.matrixWorld);
+      this.rayDirection.set(0, 0, -1).transformDirection(ray.matrixWorld).normalize();
+      const hitPlanet = experienceWorld.solarSystem.hitTest(this.rayOrigin, this.rayDirection, 5.0);
+      if (hitPlanet) {
+        this.controllerWorldPos.setFromMatrixPosition(grip.matrixWorld);
+        const grabbed = experienceWorld.solarSystem.handleGrabStart(handedness, hitPlanet, this.controllerWorldPos);
+        if (grabbed) {
+          interactionDebugState.logEvent(`planetGrabbed (${hitPlanet.name})`, handedness);
+          return;
+        }
+      }
+    }
+
+    // If already grabbing city block, ignore additional presses
+    if (this._activeGrabbedBlock) return;
 
     const target = this.findTargetBlock(grip, ray);
     if (target) {
@@ -202,9 +232,17 @@ export class CityXRInput {
   }
 
   private handleXRInputEnd(e: XRInputSourceEvent, eventType: 'select' | 'squeeze'): void {
-    if (!this._activeGrabbedBlock || !this.interaction) return;
     const handedness = (e.inputSource.handedness as 'left' | 'right') || 'right';
     interactionDebugState.logEvent(`${eventType}End (${handedness})`, 'XRInput');
+
+    // Check if releasing a grabbed planet
+    if (experienceWorld?.solarSystem?.isHoldingPlanet(handedness)) {
+      experienceWorld.solarSystem.handleGrabEnd(handedness);
+      interactionDebugState.logEvent(`planetReleased`, handedness);
+      return;
+    }
+
+    if (!this._activeGrabbedBlock || !this.interaction) return;
 
     // Only release if the event came from the hand holding the block
     if (this.activeHand === handedness) {
