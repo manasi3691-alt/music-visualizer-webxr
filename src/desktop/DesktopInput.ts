@@ -16,7 +16,9 @@ export class DesktopInput {
   private isPointerDown = false;
   private isDraggingGrab = false;
   private isDraggingCityBlock = false;
+  private isDraggingPlanet = false;
   private cityDragCumulative = new Vector3();
+  private planetDragCumulative = new Vector3();
   private lastMouseX = 0;
   private lastMouseY = 0;
 
@@ -78,6 +80,20 @@ export class DesktopInput {
     this.mouseVec.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouseVec.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
+    // Check if user clicked an interactive planet in the SolarSystem
+    if (experienceWorld?.solarSystem?.group.visible) {
+      this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const hitPlanet = experienceWorld.solarSystem.hitTest(this.raycaster.ray.origin, this.raycaster.ray.direction, 6.0);
+      if (hitPlanet) {
+        this.isDraggingPlanet = true;
+        this.planetDragCumulative.set(0, 0, 0);
+        // Start grab using ray origin
+        const startPos = new Vector3().copy(this.raycaster.ray.origin).addScaledVector(this.raycaster.ray.direction, 2.5);
+        experienceWorld.solarSystem.handleGrabStart('desktop', hitPlanet, startPos);
+        return;
+      }
+    }
+
     // Check if user clicked an interactive city building block
     if (experienceWorld?.citySystem) {
       const hitBlock = experienceWorld.citySystem.interaction.hitTest(this.camera, this.mouseVec);
@@ -121,7 +137,13 @@ export class DesktopInput {
     this.lastMouseX = e.clientX;
     this.lastMouseY = e.clientY;
 
-    if (this.isDraggingCityBlock && experienceWorld?.citySystem) {
+    if (this.isDraggingPlanet && experienceWorld?.solarSystem) {
+      this.planetDragCumulative.x += deltaX * 0.003;
+      this.planetDragCumulative.y -= deltaY * 0.003;
+      this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const currentPos = new Vector3().copy(this.raycaster.ray.origin).addScaledVector(this.raycaster.ray.direction, 2.5);
+      experienceWorld.solarSystem.handleGrabUpdate('desktop', currentPos, this.camera.position);
+    } else if (this.isDraggingCityBlock && experienceWorld?.citySystem) {
       // Map mouse drag to world-space displacement vector for the city block
       this.cityDragCumulative.x += deltaX * 0.0025;
       this.cityDragCumulative.y -= deltaY * 0.0025;
@@ -150,6 +172,10 @@ export class DesktopInput {
 
   private onMouseUp(): void {
     this.isPointerDown = false;
+    if (this.isDraggingPlanet && experienceWorld?.solarSystem) {
+      this.isDraggingPlanet = false;
+      experienceWorld.solarSystem.handleGrabEnd('desktop');
+    }
     if (this.isDraggingCityBlock && experienceWorld?.citySystem) {
       this.isDraggingCityBlock = false;
       experienceWorld.citySystem.interaction.endGrab();

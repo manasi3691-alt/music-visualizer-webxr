@@ -15,6 +15,10 @@ import { CitySystem } from '../city/CitySystem.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
+import { ShootingStarUniverse } from '../cinematic/ShootingStarUniverse.js';
+import { SolarSystem } from '../cinematic/SolarSystem.js';
+import { Camera, World } from '@iwsdk/core';
+
 export class ExperienceWorld {
   readonly rootGroup: Group = new Group();
 
@@ -25,6 +29,8 @@ export class ExperienceWorld {
   readonly particles: Particles;
   readonly lighting: LightingSystem;
   readonly citySystem: CitySystem;
+  readonly shootingStarUniverse: ShootingStarUniverse;
+  readonly solarSystem: SolarSystem;
 
   private waveOrigin = new Vector3(0, 1.1, -1.0);
 
@@ -36,6 +42,9 @@ export class ExperienceWorld {
     this.particles = new Particles(isQuest);
     this.lighting = new LightingSystem();
     this.citySystem = new CitySystem(isQuest);
+    this.shootingStarUniverse = new ShootingStarUniverse(isQuest);
+    this.shootingStarUniverse.setCityRef(this.citySystem.group);
+    this.solarSystem = new SolarSystem(isQuest);
 
     // Assemble single persistent scene graph
     this.rootGroup.add(this.atmosphere.group);
@@ -45,6 +54,8 @@ export class ExperienceWorld {
     this.rootGroup.add(this.organicForms.group);
     this.rootGroup.add(this.particles.group);
     this.rootGroup.add(this.waves.group);
+    this.rootGroup.add(this.shootingStarUniverse.group);
+    this.rootGroup.add(this.solarSystem.group);
   }
 
   /**
@@ -80,7 +91,7 @@ export class ExperienceWorld {
   /**
    * Update visual systems in strict order (Section 41)
    */
-  update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
+  update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number, world?: World, camera?: Camera): void {
     // 1. Environmental lighting & atmosphere
     this.lighting.update(frameData, metrics);
     this.atmosphere.update(frameData, metrics);
@@ -95,10 +106,18 @@ export class ExperienceWorld {
     // 4. Dynamic effects: particles & waves
     this.particles.update(frameData, metrics, deltaSec);
     this.waves.update(frameData, metrics, deltaSec);
+
+    // 5. Climax event: Shooting star & Universe transition
+    this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, world, camera);
+
+    // 6. Interactive 3D Solar System (reveals after universe transition)
+    this.solarSystem.update(deltaSec, frameData.relativeTime, world, camera);
   }
 
   reset(): void {
     this.citySystem.reset();
+    this.shootingStarUniverse.reset();
+    this.solarSystem.reset();
   }
 
   dispose(): void {
@@ -109,6 +128,8 @@ export class ExperienceWorld {
     this.waves.dispose();
     this.particles.dispose();
     this.lighting.dispose();
+    this.shootingStarUniverse.dispose();
+    this.solarSystem.dispose();
     this.rootGroup.clear();
   }
 }
