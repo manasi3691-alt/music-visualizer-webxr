@@ -170,7 +170,7 @@ export class ExperienceApp {
 
     // 4. Update visual world
     if (experienceWorld) {
-      experienceWorld.update(frameData, metrics, deltaSec);
+      experienceWorld.update(frameData, metrics, deltaSec, this.world ?? undefined, this.world?.camera);
     }
 
     // 5. Update Wrist UI
