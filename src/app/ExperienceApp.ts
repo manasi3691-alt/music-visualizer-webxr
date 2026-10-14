@@ -78,6 +78,9 @@ export class ExperienceApp {
         pause: () => audioEngine.pause(),
         getCurrentTime: () => audioEngine.currentTime,
         isPlaying: () => audioEngine.isPlaying,
+        seekRelative: (delta: number) => audioEngine.seekRelative(delta),
+        setVolume: (v: number) => audioEngine.setVolume(v),
+        getVolume: () => audioEngine.getVolume(),
       },
       excerpt: {
         sourceStart: musicExcerpt.sourceStart,
@@ -180,9 +183,6 @@ export class ExperienceApp {
     if (this.showDebug && this.debugOverlay) {
       this.updateDebugOverlay(frameData, metrics);
     }
-
-    // 6. Update Wrist UI panel
-    wristUIController.update(deltaSec);
   }
 
   async start(): Promise<void> {

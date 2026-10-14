@@ -32,6 +32,27 @@ export class AudioEngine {
     return this.audioElement.currentTime;
   }
 
+  /** Seek forward or backward within the authored excerpt bounds */
+  seekRelative(deltaSec: number): void {
+    if (!this.audioElement) return;
+    const { sourceStart, sourceEnd } = musicExcerpt;
+    const newTime = Math.max(sourceStart, Math.min(sourceEnd - 0.5, this.audioElement.currentTime + deltaSec));
+    this.audioElement.currentTime = newTime;
+  }
+
+  /** Set master gain [0.0 – 1.0] */
+  setVolume(v: number): void {
+    const clamped = Math.max(0, Math.min(1, v));
+    if (this.gainNode) {
+      this.gainNode.gain.value = clamped;
+    }
+  }
+
+  /** Current master gain value */
+  getVolume(): number {
+    return this.gainNode ? this.gainNode.gain.value : 1.0;
+  }
+
   /**
    * Prepares the audio element and verifies file availability
    */

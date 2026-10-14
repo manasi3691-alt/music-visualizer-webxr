@@ -25,60 +25,61 @@ export const EXPERIENCE_CONFIG = {
     duration: 38.0,
   },
 
-  // Color progression per musical movement
+  // Cosmic color progression per musical movement
+  // Palette: midnight blue · deep charcoal · muted teal · ivory · restrained gold
   colors: {
     arrival: {
-      sky: [0.12, 0.18, 0.32],
-      equator: [0.22, 0.28, 0.44],
-      ground: [0.08, 0.10, 0.18],
-      primaryAccent: [0.65, 0.72, 0.95], // Pale blue / cool lavender
-      warmAccent: [0.95, 0.88, 0.75],
-      intensity: 0.8,
+      sky:           [0.05, 0.09, 0.18],   // Deep midnight blue
+      equator:       [0.08, 0.14, 0.26],   // Indigo horizon
+      ground:        [0.03, 0.05, 0.09],   // Near-black charcoal
+      primaryAccent: [0.45, 0.62, 0.80],   // Dusty blue-ivory
+      warmAccent:    [0.78, 0.72, 0.60],   // Muted warm ivory
+      intensity: 0.75,
     } as ColorStop,
 
     discovery: {
-      sky: [0.18, 0.22, 0.42],
-      equator: [0.35, 0.35, 0.58],
-      ground: [0.12, 0.14, 0.24],
-      primaryAccent: [0.75, 0.68, 0.98], // Lavender & sky blue
-      warmAccent: [1.0, 0.82, 0.65],
-      intensity: 1.0,
+      sky:           [0.07, 0.12, 0.24],   // Midnight indigo lightening
+      equator:       [0.12, 0.22, 0.36],   // Deep teal-blue horizon
+      ground:        [0.04, 0.07, 0.12],   // Dark charcoal
+      primaryAccent: [0.40, 0.68, 0.72],   // Muted teal
+      warmAccent:    [0.82, 0.74, 0.55],   // Muted gold-ivory
+      intensity: 0.92,
     } as ColorStop,
 
     development: {
-      sky: [0.25, 0.20, 0.48],
-      equator: [0.45, 0.30, 0.65],
-      ground: [0.15, 0.12, 0.28],
-      primaryAccent: [0.85, 0.45, 0.82], // Violet & pink & turquoise
-      warmAccent: [0.35, 0.85, 0.82],
-      intensity: 1.2,
+      sky:           [0.08, 0.14, 0.28],   // Rich midnight blue
+      equator:       [0.15, 0.28, 0.40],   // Deep teal horizon
+      ground:        [0.05, 0.08, 0.14],   // Charcoal
+      primaryAccent: [0.35, 0.70, 0.68],   // Muted teal-green
+      warmAccent:    [0.85, 0.78, 0.52],   // Soft gold
+      intensity: 1.05,
     } as ColorStop,
 
     build: {
-      sky: [0.35, 0.22, 0.55],
-      equator: [0.60, 0.35, 0.70],
-      ground: [0.20, 0.15, 0.32],
-      primaryAccent: [0.98, 0.55, 0.75], // Richer saturation, warm highlights
-      warmAccent: [1.0, 0.78, 0.45],
-      intensity: 1.5,
+      sky:           [0.09, 0.16, 0.30],   // Deep navy blue
+      equator:       [0.18, 0.32, 0.44],   // Teal-blue horizon brightening
+      ground:        [0.06, 0.10, 0.16],   // Deep charcoal
+      primaryAccent: [0.55, 0.78, 0.75],   // Bright muted teal
+      warmAccent:    [0.90, 0.82, 0.55],   // Restrained warm gold
+      intensity: 1.20,
     } as ColorStop,
 
     climax: {
-      sky: [0.55, 0.45, 0.75],
-      equator: [0.85, 0.70, 0.90],
-      ground: [0.35, 0.28, 0.45],
-      primaryAccent: [1.0, 0.95, 0.90], // Bright warm white, soft gold, violet
-      warmAccent: [1.0, 0.88, 0.50],
-      intensity: 2.2,
+      sky:           [0.12, 0.20, 0.38],   // Deep but luminous navy
+      equator:       [0.22, 0.38, 0.52],   // Pale teal horizon
+      ground:        [0.08, 0.12, 0.20],   // Dark charcoal-blue
+      primaryAccent: [0.80, 0.88, 0.85],   // Near-white soft ivory
+      warmAccent:    [0.95, 0.88, 0.62],   // Warm gold highlight
+      intensity: 1.65,
     } as ColorStop,
 
     release: {
-      sky: [0.20, 0.22, 0.38],
-      equator: [0.40, 0.38, 0.52],
-      ground: [0.12, 0.12, 0.20],
-      primaryAccent: [0.88, 0.82, 0.92], // Soft lavender, pale peach, warm white
-      warmAccent: [0.95, 0.80, 0.70],
-      intensity: 0.9,
+      sky:           [0.06, 0.10, 0.20],   // Returning to midnight
+      equator:       [0.10, 0.18, 0.28],   // Quiet indigo
+      ground:        [0.03, 0.05, 0.10],   // Near-black
+      primaryAccent: [0.50, 0.62, 0.70],   // Cool blue-grey
+      warmAccent:    [0.75, 0.70, 0.58],   // Warm parchment
+      intensity: 0.82,
     } as ColorStop,
   },
 

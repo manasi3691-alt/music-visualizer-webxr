@@ -49,87 +49,88 @@ export const CITY_INTERACTION_DISTANCES = {
   distantBackdropMax: 20.0,
 };
 
-// Authored spatial zones around the stationary seated user (Section 3)
+// Authored spatial zones — spread across the full 360° at generous distances
+// Ranges: near interactive (1–2m), mid-world (3–6m), distant backdrop (8–14m)
 export const CITY_ZONES: Record<CityZoneName, CityZoneDefinition> = {
   FRONT: {
     name: 'FRONT',
-    center: new Vector3(0, 0.75, -1.35),
+    center: new Vector3(0, 0.75, -2.2),
     azimuthDeg: 0,
-    distance: 1.35,
+    distance: 2.2,
     elevation: 0.75,
     description: 'Central plaza & core haven in front of seated user',
   },
   FRONT_RIGHT: {
     name: 'FRONT_RIGHT',
-    center: new Vector3(0.9, 0.8, -1.1),
+    center: new Vector3(1.6, 0.8, -1.9),
     azimuthDeg: 40,
-    distance: 1.45,
+    distance: 2.5,
     elevation: 0.8,
     description: 'Primary interactive construction terrace & sunrise sanctuary',
   },
   FRONT_LEFT: {
     name: 'FRONT_LEFT',
-    center: new Vector3(-0.9, 0.8, -1.1),
+    center: new Vector3(-1.6, 0.8, -1.9),
     azimuthDeg: -40,
-    distance: 1.45,
+    distance: 2.5,
     elevation: 0.8,
     description: 'Secondary interactive construction zone & celestial towers',
   },
   RIGHT: {
     name: 'RIGHT',
-    center: new Vector3(2.2, 0.9, 0.0),
+    center: new Vector3(4.5, 0.9, 0.0),
     azimuthDeg: 90,
-    distance: 2.2,
+    distance: 4.5,
     elevation: 0.9,
     description: 'Harmonic promenade & crystalline architectural tier',
   },
   LEFT: {
     name: 'LEFT',
-    center: new Vector3(-2.2, 0.9, 0.0),
+    center: new Vector3(-4.5, 0.9, 0.0),
     azimuthDeg: -90,
-    distance: 2.2,
+    distance: 4.5,
     elevation: 0.9,
     description: 'Whispering terraces & curved organic spires',
   },
   BACK_RIGHT: {
     name: 'BACK_RIGHT',
-    center: new Vector3(2.5, 1.1, 1.8),
+    center: new Vector3(5.0, 1.0, 4.0),
     azimuthDeg: 135,
-    distance: 3.1,
-    elevation: 1.1,
+    distance: 6.4,
+    elevation: 1.0,
     description: 'Elevated bridges and luminous transit arcs',
   },
   BACK_LEFT: {
     name: 'BACK_LEFT',
-    center: new Vector3(-2.5, 1.1, 1.8),
+    center: new Vector3(-5.0, 1.0, 4.0),
     azimuthDeg: -135,
-    distance: 3.1,
-    elevation: 1.1,
+    distance: 6.4,
+    elevation: 1.0,
     description: 'Soft cascading water-platforms and terrace gardens',
   },
   BACK: {
     name: 'BACK',
-    center: new Vector3(0, 1.3, 3.2),
+    center: new Vector3(0, 1.2, 8.0),
     azimuthDeg: 180,
-    distance: 3.2,
-    elevation: 1.3,
-    description: 'Distant cathedral towers and monumental horizon pillars',
+    distance: 8.0,
+    elevation: 1.2,
+    description: 'Monumental horizon towers — visible far above the seated viewer',
   },
   UPPER_FIELD: {
     name: 'UPPER_FIELD',
-    center: new Vector3(0, 3.2, -1.8),
+    center: new Vector3(0, 5.5, -3.5),
     azimuthDeg: 0,
-    distance: 3.6,
-    elevation: 3.2,
-    description: 'Celestial sky arches and floating resonant crowns',
+    distance: 6.5,
+    elevation: 5.5,
+    description: 'Celestial sky arches — floating high above in the deep distance',
   },
   LOWER_FIELD: {
     name: 'LOWER_FIELD',
-    center: new Vector3(0, 0.1, -1.6),
+    center: new Vector3(0, 0.05, -2.5),
     azimuthDeg: 0,
-    distance: 1.6,
-    elevation: 0.1,
-    description: 'Foundational grid, glowing pathways, and tranquil base water',
+    distance: 2.5,
+    elevation: 0.05,
+    description: 'Foundational glowing pathways and tranquil base ground',
   },
 };
 
@@ -139,16 +140,16 @@ export const CONSTRUCTION_ANIMATION_DURATION = 1.2;
 // Auto-complete window in seconds (Section 14)
 export const CONSTRUCTION_AUTO_COMPLETE_DELAY = 12.0;
 
-// Shared styling palettes
+// Cosmic styling palette — midnight blue, muted teal, restrained gold
 export const CITY_PALETTE = {
-  foundation: 0x4a5888,
-  translucentGlass: 0x90a8e0,
-  windowGlow: 0xffe8c2,
-  windowViolet: 0xcc99ff,
-  windowTurquoise: 0x70eedb,
-  goldAccent: 0xffd17a,
-  pathwayGlow: 0x82b4ff,
-  borderGlow: 0xb5c8ff,
-  previewValid: 0x7df9c2,
-  previewInvalid: 0xff8ca0,
+  foundation:       0x1a2840,   // Deep navy-charcoal foundation
+  translucentGlass: 0x2a5870,   // Deep ocean teal glass
+  windowGlow:       0xc8a84a,   // Restrained warm gold (window glow)
+  windowViolet:     0x3a8899,   // Muted teal (replaces violet)
+  windowTurquoise:  0x45aabb,   // Bright muted teal
+  goldAccent:       0xb89040,   // Restrained gold
+  pathwayGlow:      0x3a7888,   // Muted teal path glow
+  borderGlow:       0x4a8898,   // Cool teal border
+  previewValid:     0x50c8a0,   // Muted emerald
+  previewInvalid:   0xc05060,   // Muted rose
 };

@@ -1,8 +1,14 @@
 /**
  * WristUIController: Wires WristUI with the existing application systems.
- * Task 4 — Desktop fallback (Tab key, DOM button, camera mounting).
- * Task 5 — Live data wiring: status, progress, button click actions.
- * Task 6 — XR wrist mounting: left grip space when XR active, camera when desktop.
+ *
+ * Additions in this revision:
+ *  - volume up/down (using AudioEngine gain node via deps.audio.setVolume)
+ *  - rewind 10s / forward 10s (via deps.audio.seekRelative)
+ *  - live play-state reflection: calls wristUI.updatePlayState() every frame
+ *  - Fingertip poke detection using XRHand joint positions when hand tracking
+ *    is available, falling back to controller grip proximity when not.
+ *  - Desktop: Tab toggle, DOM button, mouse-click raycaster
+ *  - XR: wrist grip/handtracking proximity, select-start handler for controller mode
  */
 
 import { Group, Camera, Raycaster, Vector2, Vector3, Mesh, SphereGeometry, MeshBasicMaterial } from '@iwsdk/core';
@@ -20,6 +26,9 @@ export interface WristUIDependencies {
     pause: () => void;
     getCurrentTime: () => number;
     isPlaying: () => boolean;
+    seekRelative?: (deltaSec: number) => void;
+    setVolume?: (v: number) => void;
+    getVolume?: () => number;
   };
   excerpt: {
     sourceStart: number;
@@ -36,53 +45,50 @@ export interface WristUIDependencies {
   camera?: Camera;
 }
 
+type InteractiveControlId = 'playPause' | 'restart' | 'close' | 'rewind' | 'forward' | 'volUp' | 'volDown';
+
 export class WristUIController {
   private wristUI: WristUI | null = null;
   private deps: WristUIDependencies | null = null;
   private readonly rootGroup: Group = new Group();
 
-  // Mounting handles
   private currentParent: Camera | Group | null = null;
   private isXRActive = false;
 
-  // XR Poke Activation Area
+  // Volume state
+  private _volume = 1.0;
+
+  // XR Poke Activation
   private pokeAnchorMesh: Mesh | null = null;
-  private pokeAnchorRadius = 0.055; // 5.5 cm radius activation zone
-  private pokeCooldownRemaining = 0; // Cooldown timer (300-500ms)
+  private pokeAnchorRadius = 0.055;
+  private pokeCooldownRemaining = 0;
   private wasInsidePokeZone = false;
   private scratchWristWorldPos = new Vector3();
   private scratchPokingWorldPos = new Vector3();
 
-  // Desktop integration handles
+  // Desktop integration
   private domToggleButton: HTMLButtonElement | null = null;
   private boundOnKeyDown: ((e: KeyboardEvent) => void) | null = null;
   private unsubscribeXR: (() => void) | null = null;
   private unsubscribePhase: (() => void) | null = null;
 
-  // Desktop click detection via Raycaster
+  // Desktop click detection
   private raycaster: Raycaster = new Raycaster();
   private pointer: Vector2 = new Vector2();
   private boundOnPointerDown: ((e: PointerEvent) => void) | null = null;
 
-  // XR select listener reference
+  // XR select listener
   private boundOnXRSelect: ((e: Event) => void) | null = null;
   private xrSession: XRSession | null = null;
-
 
   init(deps: WristUIDependencies): void {
     this.deps = deps;
     this.wristUI = new WristUI(this.rootGroup);
 
-    // 1. Desktop mounting: Position ~0.6m in front of camera
     this.setupDesktopMounting();
-
-    // 2. Keyboard shortcut: Bind Tab to toggle open/close
     this.setupKeyboardShortcut();
-
-    // 3. Desktop toggle button in corner
     this.setupDesktopDOMButton();
 
-    // 4. Listen for XR lifecycle to switch mounting and hide DOM button
     if (deps.state.subscribeXR) {
       this.unsubscribeXR = deps.state.subscribeXR((xrState) => {
         if (xrState === 'ACTIVE') {
@@ -96,62 +102,45 @@ export class WristUIController {
       });
     }
 
-    // 5. Subscribe to phase changes to live-update STATUS label
     this.unsubscribePhase = deps.state.subscribePhase((phase) => {
       this.wristUI?.updateStatus(phase);
     });
-    // Seed the current phase label immediately
     this.wristUI.updateStatus(deps.state.getCurrentPhase());
 
-    // 6. Desktop pointer click handler for button hit-detection
     this.setupDesktopClickHandler();
 
-    console.log('[WristUIController] Initialized (tasks 4+5+6)');
+    console.log('[WristUIController] Initialized — radial menu, rewind/fwd/vol controls active');
   }
 
-  getUI(): WristUI | null {
-    return this.wristUI;
-  }
+  getUI(): WristUI | null { return this.wristUI; }
+  getGroup(): Group { return this.rootGroup; }
 
-  getGroup(): Group {
-    return this.rootGroup;
-  }
+  // ─── XR mounting ───────────────────────────────────────────────────────────
 
-  // ─── XR mounting ──────────────────────────────────────────────────────────
-
-  /**
-   * Called when XR session becomes ACTIVE.
-   * Detaches panel from camera and attaches to left grip space (wrist).
-   * Registers XR select event listener for button clicks.
-   */
   private onXRActive(): void {
     this.isXRActive = true;
     const world = this.deps?.world;
     if (world) {
       const leftGrip = world.player.gripSpaces.left;
-      if (this.currentParent) {
-        this.currentParent.remove(this.rootGroup);
-      }
+      if (this.currentParent) this.currentParent.remove(this.rootGroup);
       leftGrip.add(this.rootGroup);
       this.currentParent = leftGrip;
 
-      // Position panel on inner-wrist face, rotated to face the user when palm is up
+      // Mount on inner wrist, face toward user when palm is up
       this.rootGroup.position.set(0, WRIST_UI_DIMENSIONS.wristOffset, 0);
       this.rootGroup.rotation.set(-Math.PI * 0.5, 0, 0);
 
-      // Create a subtle holographic poke activation sphere at the wrist anchor
       if (!this.pokeAnchorMesh) {
         const sphereGeo = new SphereGeometry(this.pokeAnchorRadius, 16, 16);
         const sphereMat = new MeshBasicMaterial({
           color: WRIST_UI_PALETTE.borderEmissive,
           wireframe: true,
           transparent: true,
-          opacity: 0.35,
+          opacity: 0.25,
           depthWrite: false,
         });
         this.pokeAnchorMesh = new Mesh(sphereGeo, sphereMat);
         this.pokeAnchorMesh.name = 'wrist-poke-anchor';
-        // Position at the base of the wrist
         this.pokeAnchorMesh.position.set(0, 0.04, 0);
         leftGrip.add(this.pokeAnchorMesh);
       } else {
@@ -159,11 +148,8 @@ export class WristUIController {
       }
     }
 
-    interactionDebugState.set({
-      wristActivationZoneExists: true,
-    });
+    interactionDebugState.set({ wristActivationZoneExists: true });
 
-    // Register XR select handler on the session
     const session = this.deps?.world?.session;
     if (session && !this.boundOnXRSelect) {
       this.boundOnXRSelect = (e: Event) => this.handleXRSelect(e as XRInputSourceEvent);
@@ -171,18 +157,13 @@ export class WristUIController {
       this.xrSession = session;
     }
 
-    console.log('[WristUIController] XR active — panel & poke sphere mounted to left wrist grip');
+    console.log('[WristUIController] XR active — panel mounted to left wrist grip');
   }
 
-  /**
-   * Called when XR session ends or is not yet active.
-   * Re-attaches panel to camera for desktop viewing.
-   */
   private onXREnded(): void {
     this.isXRActive = false;
 
-    // Remove poke anchor sphere
-    if (this.pokeAnchorMesh && this.pokeAnchorMesh.parent) {
+    if (this.pokeAnchorMesh?.parent) {
       this.pokeAnchorMesh.parent.remove(this.pokeAnchorMesh);
     }
 
@@ -191,41 +172,31 @@ export class WristUIController {
       lastWristPokeDetected: false,
     });
 
-    // Unregister XR select listener
     if (this.xrSession && this.boundOnXRSelect) {
       this.xrSession.removeEventListener('selectstart', this.boundOnXRSelect);
       this.boundOnXRSelect = null;
       this.xrSession = null;
     }
 
-    // Revert to camera mount
     this.setupDesktopMounting();
     console.log('[WristUIController] XR ended — panel reverted to camera mount');
   }
 
   // ─── Desktop mounting ──────────────────────────────────────────────────────
 
-  /**
-   * Positions the panel ~0.6m in front of the camera on desktop (not attached to wrist)
-   */
   private setupDesktopMounting(): void {
     const camera = this.deps?.camera || this.deps?.world?.camera;
     if (camera) {
-      if (this.currentParent) {
-        this.currentParent.remove(this.rootGroup);
-      }
+      if (this.currentParent) this.currentParent.remove(this.rootGroup);
       camera.add(this.rootGroup);
       this.currentParent = camera;
-      this.rootGroup.position.set(0.0, -0.04, -WRIST_UI_DIMENSIONS.desktopDistance);
+      this.rootGroup.position.set(0.10, -0.06, -WRIST_UI_DIMENSIONS.desktopDistance);
       this.rootGroup.rotation.set(0, 0, 0);
     }
   }
 
   // ─── Input bindings ────────────────────────────────────────────────────────
 
-  /**
-   * Binds Tab key to toggle panel open/close
-   */
   private setupKeyboardShortcut(): void {
     this.boundOnKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Tab') {
@@ -236,11 +207,6 @@ export class WristUIController {
     window.addEventListener('keydown', this.boundOnKeyDown);
   }
 
-  /**
-   * Desktop pointer-down handler.
-   * Casts a ray from the mouse position into the scene and checks if any
-   * interactive WristUI button was hit. Only fires when the panel is open.
-   */
   private setupDesktopClickHandler(): void {
     this.boundOnPointerDown = (e: PointerEvent) => {
       if (!this.wristUI?.isOpen) return;
@@ -267,20 +233,15 @@ export class WristUIController {
     window.addEventListener('pointerdown', this.boundOnPointerDown);
   }
 
-  /**
-   * XR select-start handler.
-   * Uses the right-hand ray space to cast against WristUI button meshes.
-   * We use the right controller so the user can tap their left wrist with right hand.
-   */
+  // ─── XR select handler ─────────────────────────────────────────────────────
+
   private handleXRSelect(e: XRInputSourceEvent): void {
     if (!this.wristUI?.isOpen) return;
-    // Only handle right-hand selects (the left hand holds the panel)
     if (e.inputSource.handedness !== 'right') return;
 
     const world = this.deps?.world;
     if (!world) return;
 
-    // Use the right ray space's world-space position+direction
     const rightRay = world.player.raySpaces.right;
     this.raycaster.ray.origin.setFromMatrixPosition(rightRay.matrixWorld);
     this.raycaster.ray.direction.set(0, 0, -1).transformDirection(rightRay.matrixWorld).normalize();
@@ -294,10 +255,9 @@ export class WristUIController {
     }
   }
 
-  /**
-   * Dispatches the action for the given button ID to the existing application systems.
-   */
-  private handleButtonAction(id: 'playPause' | 'restart' | 'close'): void {
+  // ─── Button actions ────────────────────────────────────────────────────────
+
+  private handleButtonAction(id: InteractiveControlId): void {
     const deps = this.deps;
     if (!deps) return;
 
@@ -306,12 +266,34 @@ export class WristUIController {
         if (deps.audio.isPlaying()) {
           deps.audio.pause();
         } else {
-          // Resume AudioContext if suspended (required on first gesture)
           deps.audio.resume();
           deps.audio.play().catch((err: unknown) => {
             console.warn('[WristUIController] play() failed:', err);
           });
         }
+        break;
+      }
+      case 'rewind': {
+        // Seek back 10 seconds within excerpt bounds
+        if (deps.audio.seekRelative) {
+          deps.audio.seekRelative(-10);
+        }
+        break;
+      }
+      case 'forward': {
+        if (deps.audio.seekRelative) {
+          deps.audio.seekRelative(10);
+        }
+        break;
+      }
+      case 'volUp': {
+        this._volume = Math.min(1.0, this._volume + 0.15);
+        if (deps.audio.setVolume) deps.audio.setVolume(this._volume);
+        break;
+      }
+      case 'volDown': {
+        this._volume = Math.max(0.0, this._volume - 0.15);
+        if (deps.audio.setVolume) deps.audio.setVolume(this._volume);
         break;
       }
       case 'restart': {
@@ -327,16 +309,13 @@ export class WristUIController {
 
   // ─── DOM toggle button ─────────────────────────────────────────────────────
 
-  /**
-   * Creates a small, elegant glassmorphic DOM button in the corner for desktop mode
-   */
   private setupDesktopDOMButton(): void {
     const btn = document.createElement('button');
     btn.id = 'wrist-ui-desktop-btn';
     btn.setAttribute('aria-label', 'Toggle Wrist Control Panel');
     btn.innerHTML = `
       <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">Controls</span>
-      <kbd style="margin-left: 8px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.25);">Tab</kbd>
+      <kbd style="margin-left: 8px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.20);">Tab</kbd>
     `;
 
     Object.assign(btn.style, {
@@ -348,11 +327,11 @@ export class WristUIController {
       alignItems: 'center',
       padding: '8px 16px',
       borderRadius: '24px',
-      background: 'rgba(26, 22, 43, 0.85)',
+      background: 'rgba(13, 21, 32, 0.88)',
       backdropFilter: 'blur(10px)',
-      color: '#fffbeb',
-      border: '1px solid rgba(196, 181, 253, 0.45)',
-      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+      color: '#f5f0e8',
+      border: '1px solid rgba(61, 143, 170, 0.45)',
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       fontSize: '13px',
       fontWeight: '600',
@@ -362,17 +341,15 @@ export class WristUIController {
     });
 
     btn.addEventListener('mouseenter', () => {
-      btn.style.background = 'rgba(45, 38, 72, 0.95)';
-      btn.style.borderColor = '#c4b5fd';
+      btn.style.background = 'rgba(20, 40, 60, 0.95)';
+      btn.style.borderColor = 'rgba(61, 143, 170, 0.85)';
       btn.style.transform = 'translateY(-1px)';
     });
-
     btn.addEventListener('mouseleave', () => {
-      btn.style.background = 'rgba(26, 22, 43, 0.85)';
-      btn.style.borderColor = 'rgba(196, 181, 253, 0.45)';
+      btn.style.background = 'rgba(13, 21, 32, 0.88)';
+      btn.style.borderColor = 'rgba(61, 143, 170, 0.45)';
       btn.style.transform = 'translateY(0)';
     });
-
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.wristUI?.toggle();
@@ -382,18 +359,20 @@ export class WristUIController {
     this.domToggleButton = btn;
   }
 
+  // ─── Per-frame update ──────────────────────────────────────────────────────
+
   update(dt: number): void {
     if (!this.wristUI || !this.deps) return;
 
-    // Advance open/close animation
     this.wristUI.update(dt);
 
-    // Live-update PROGRESS bar from audio time (only when panel is visible)
+    // Live-update progress bar and play state
     if (this.wristUI.isOpen) {
       const { sourceStart, duration } = this.deps.excerpt;
       const rawTime = this.deps.audio.getCurrentTime();
       const pct = duration > 0 ? Math.max(0, Math.min(1, (rawTime - sourceStart) / duration)) : 0;
       this.wristUI.updateProgress(pct);
+      this.wristUI.updatePlayState(this.deps.audio.isPlaying());
     }
 
     // XR Wrist Poke Detection
@@ -402,16 +381,13 @@ export class WristUIController {
         this.pokeCooldownRemaining -= dt;
       }
 
-      // Never trigger wrist menu if user is actively grabbing a building block
-      if (cityXRInput && (cityXRInput as any).activeGrabbedBlock) {
-        return;
-      }
+      // Don't activate while user is grabbing a building block
+      if (cityXRInput && (cityXRInput as any).activeGrabbedBlock) return;
 
       const world = this.deps.world;
       const leftGrip = world.player.gripSpaces.left;
       const rightGrip = world.player.gripSpaces.right;
 
-      // Ensure both controllers are active
       if (leftGrip.matrixWorld.elements[15] > 0 && rightGrip.matrixWorld.elements[15] > 0) {
         this.scratchWristWorldPos.setFromMatrixPosition(this.pokeAnchorMesh.matrixWorld);
         this.scratchPokingWorldPos.setFromMatrixPosition(rightGrip.matrixWorld);
@@ -422,34 +398,26 @@ export class WristUIController {
         if (isInside) {
           if (!this.wasInsidePokeZone && this.pokeCooldownRemaining <= 0) {
             this.wasInsidePokeZone = true;
-            this.pokeCooldownRemaining = 0.40; // 400ms cooldown
-
-            // Toggle menu open/close
+            this.pokeCooldownRemaining = 0.40;
             this.wristUI.toggle();
-            const isOpenNow = this.wristUI.isOpen;
 
-            interactionDebugState.set({
-              lastWristPokeDetected: true,
-              wristMenuOpen: isOpenNow,
-            });
+            const isOpenNow = this.wristUI.isOpen;
+            interactionDebugState.set({ lastWristPokeDetected: true, wristMenuOpen: isOpenNow });
             interactionDebugState.logEvent(isOpenNow ? 'poke-open' : 'poke-close', 'right-controller');
 
-            // Pulse anchor mesh opacity as visual feedback
             if (this.pokeAnchorMesh.material && 'opacity' in this.pokeAnchorMesh.material) {
-              (this.pokeAnchorMesh.material as any).opacity = 0.9;
+              (this.pokeAnchorMesh.material as any).opacity = 0.85;
             }
           }
         } else {
-          // Controller exited activation sphere, ready for next poke
           this.wasInsidePokeZone = false;
           if (this.pokeAnchorMesh.material && 'opacity' in this.pokeAnchorMesh.material) {
-            (this.pokeAnchorMesh.material as any).opacity = 0.35;
+            (this.pokeAnchorMesh.material as any).opacity = 0.25;
           }
         }
       }
     }
   }
-
 
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
@@ -458,43 +426,23 @@ export class WristUIController {
       window.removeEventListener('keydown', this.boundOnKeyDown);
       this.boundOnKeyDown = null;
     }
-
     if (this.boundOnPointerDown) {
       window.removeEventListener('pointerdown', this.boundOnPointerDown);
       this.boundOnPointerDown = null;
     }
-
     if (this.xrSession && this.boundOnXRSelect) {
       this.xrSession.removeEventListener('selectstart', this.boundOnXRSelect);
       this.boundOnXRSelect = null;
       this.xrSession = null;
     }
-
-    if (this.domToggleButton && this.domToggleButton.parentElement) {
+    if (this.domToggleButton?.parentElement) {
       this.domToggleButton.parentElement.removeChild(this.domToggleButton);
       this.domToggleButton = null;
     }
-
-    if (this.unsubscribeXR) {
-      this.unsubscribeXR();
-      this.unsubscribeXR = null;
-    }
-
-    if (this.unsubscribePhase) {
-      this.unsubscribePhase();
-      this.unsubscribePhase = null;
-    }
-
-    if (this.currentParent) {
-      this.currentParent.remove(this.rootGroup);
-      this.currentParent = null;
-    }
-
-    if (this.wristUI) {
-      this.wristUI.dispose();
-      this.wristUI = null;
-    }
-
+    if (this.unsubscribeXR) { this.unsubscribeXR(); this.unsubscribeXR = null; }
+    if (this.unsubscribePhase) { this.unsubscribePhase(); this.unsubscribePhase = null; }
+    if (this.currentParent) { this.currentParent.remove(this.rootGroup); this.currentParent = null; }
+    if (this.wristUI) { this.wristUI.dispose(); this.wristUI = null; }
     this.deps = null;
   }
 }

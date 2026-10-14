@@ -55,30 +55,30 @@ export class CitySystem {
     this.setupCalmFoundations();
 
     // 2. Interactive Building Blocks (Sections 7, 8, 9, 16)
-    // Block 1: Type B Medium architectural block placed on front-right podium
+    // Block 1: Type B Medium architectural block placed on front-right podium (in arm's reach)
     this.grabbableBlock1 = new CityBlock({
       id: 'city-block-alpha',
       width: 0.28,
       height: 0.22,
       depth: 0.28,
       isInteractive: true,
-      color: 0x9fbaff,
-      emissive: 0x22386a,
+      color: 0x4a8898,   // Muted teal
+      emissive: 0x112233,
       opacity: 0.85,
-      position: new Vector3(0.42, 0.95, -0.85), // Seated comfortable arm reach ~0.95m
+      position: new Vector3(0.42, 0.95, -0.85),
     });
     this.group.add(this.grabbableBlock1.group);
     this.interaction.registerBlock(this.grabbableBlock1);
 
-    // Block 2: Type D Organic architectural block placed on front-left podium (for Development phase)
+    // Block 2: Type D Organic architectural block placed on front-left podium
     this.grabbableBlock2 = new CityBlock({
       id: 'city-block-beta',
       width: 0.26,
       height: 0.24,
       depth: 0.26,
       isInteractive: true,
-      color: 0xb599ea,
-      emissive: 0x332066,
+      color: 0xb89040,   // Restrained gold
+      emissive: 0x2a1a08,
       opacity: 0.85,
       position: new Vector3(-0.42, 0.95, -0.85),
     });
@@ -87,13 +87,13 @@ export class CitySystem {
     this.interaction.registerBlock(this.grabbableBlock2);
 
     // 3. Authored Construction Zones (Sections 7, 8, 10)
-    // Zone 1: Front-Right interactive terrace
+    // Zone 1: Front-Right interactive terrace (within seated arm reach)
     this.constructionZone1 = new ConstructionZone({
       id: 'zone-front-right',
-      position: new Vector3(0.68, 0.85, -1.05), // ~1.3m radial distance, seated reach
+      position: new Vector3(0.68, 0.85, -1.0),
       defaultBuildingType: 'TYPE_B',
       radius: 0.36,
-      label: 'Terrace Haven',
+      label: 'Stellar Haven',
     });
     this.group.add(this.constructionZone1.group);
     this.interaction.registerZone(this.constructionZone1);
@@ -101,10 +101,10 @@ export class CitySystem {
     // Zone 2: Front-Left interactive terrace
     this.constructionZone2 = new ConstructionZone({
       id: 'zone-front-left',
-      position: new Vector3(-0.68, 0.85, -1.05),
+      position: new Vector3(-0.68, 0.85, -1.0),
       defaultBuildingType: 'TYPE_D',
       radius: 0.36,
-      label: 'Crystal Arc',
+      label: 'Void Arch',
     });
     this.group.add(this.constructionZone2.group);
     this.interaction.registerZone(this.constructionZone2);
@@ -129,30 +129,30 @@ export class CitySystem {
    * Builds the minimal peaceful foundation blocks for CALM phase (0 - 4s)
    */
   private setupCalmFoundations(): void {
-    // Central primary foundation slab
+    // Central primary foundation slab — deep navy charcoal
     const centerSlab = new CityBlock({
       id: 'calm-center-slab',
       width: 1.1,
       height: 0.08,
       depth: 0.9,
       isInteractive: false,
-      color: 0x3a4870,
-      emissive: 0x141e38,
-      opacity: 0.8,
+      color:   0x1a2840,  // Deep navy
+      emissive: 0x080e18,
+      opacity: 0.80,
       position: new Vector3(0, 0.65, -1.2),
     });
     this.group.add(centerSlab.group);
     this.calmBlocks.push(centerSlab);
 
-    // 2 small accent blocks flanking the center
+    // Small muted teal accent blocks flanking the center
     const accent1 = new CityBlock({
       id: 'calm-accent-1',
       width: 0.22,
       height: 0.16,
       depth: 0.22,
       isInteractive: false,
-      color: 0x6e88d0,
-      emissive: 0x1a2850,
+      color:   0x2a6070,  // Muted teal
+      emissive: 0x0a2030,
       opacity: 0.75,
       position: new Vector3(-0.35, 0.77, -1.25),
     });
@@ -165,8 +165,8 @@ export class CitySystem {
       height: 0.16,
       depth: 0.22,
       isInteractive: false,
-      color: 0x6e88d0,
-      emissive: 0x1a2850,
+      color:   0x2a6070,  // Muted teal
+      emissive: 0x0a2030,
       opacity: 0.75,
       position: new Vector3(0.35, 0.77, -1.25),
     });
@@ -179,139 +179,143 @@ export class CitySystem {
    */
   private setupDistricts(): void {
     const districtConfigs: DistrictConfig[] = [
-      // 1. FRONT: Core Haven (Discovery)
+      // 1. FRONT: Core Haven (Discovery) — nearest district, elegant pair of towers
       {
         id: 'dist-front',
         name: 'Core Haven',
         zone: 'FRONT',
         activationPhase: 'DISCOVERY',
         hasPlatform: true,
-        platformRadius: 0.95,
+        platformRadius: 1.4,
         buildings: [
-          { type: 'TYPE_A', relPos: [0, 0.0, -0.15], scale: 1.0, color: 0x8aa8e8 },
-          { type: 'TYPE_A', relPos: [-0.42, 0.0, 0.15], scale: 0.85, color: 0x9dbbf5 },
+          { type: 'TYPE_C', relPos: [0, 0.0, -0.2], scale: 1.4, color: 0x4a8898 },   // Muted teal tower
+          { type: 'TYPE_A', relPos: [-0.6, 0.0, 0.3], scale: 1.0, color: 0x5a7888 }, // Charcoal-teal small
+          { type: 'TYPE_A', relPos: [0.6, 0.0, 0.3], scale: 1.0, color: 0x5a7888 },
         ],
         connections: [
-          { from: [-0.42, 0, 0.15], to: [0, 0, -0.15], width: 0.12 },
+          { from: [-0.6, 0, 0.3], to: [0, 0, -0.2], width: 0.16 },
+          { from: [0.6, 0, 0.3], to: [0, 0, -0.2], width: 0.16 },
         ],
       },
 
-      // 2. FRONT_RIGHT: Sunrise Terrace (Discovery -> Development)
+      // 2. FRONT_RIGHT: Stellar Terrace (Development) — mid distance
       {
         id: 'dist-front-right',
-        name: 'Sunrise Terrace',
+        name: 'Stellar Terrace',
         zone: 'FRONT_RIGHT',
         activationPhase: 'DEVELOPMENT',
         hasPlatform: true,
-        platformRadius: 1.1,
+        platformRadius: 1.5,
         buildings: [
-          { type: 'TYPE_B', relPos: [0.15, 0.0, -0.2], scale: 1.05, color: 0x9080e0 },
-          { type: 'TYPE_A', relPos: [-0.35, 0.0, 0.2], scale: 0.9, color: 0x70d8d0 },
-          { type: 'TYPE_E', relPos: [0.4, 0.0, 0.3], rotY: Math.PI * 0.25, scale: 0.9 },
+          { type: 'TYPE_B', relPos: [0.2, 0.0, -0.3], scale: 1.4, color: 0x3a7888 },
+          { type: 'TYPE_D', relPos: [-0.5, 0.0, 0.3], scale: 1.1, color: 0x2a6878 },
+          { type: 'TYPE_E', relPos: [0.55, 0.0, 0.4], rotY: Math.PI * 0.25, scale: 1.2 },
         ],
         connections: [
-          { from: [-0.35, 0, 0.2], to: [0.15, 0, -0.2], width: 0.14 },
-          { from: [0.15, 0, -0.2], to: [0.4, 0, 0.3], width: 0.12 },
+          { from: [-0.5, 0, 0.3], to: [0.2, 0, -0.3], width: 0.18 },
+          { from: [0.2, 0, -0.3], to: [0.55, 0, 0.4], width: 0.14 },
         ],
       },
 
-      // 3. FRONT_LEFT: Celestial Quarter (Development)
+      // 3. FRONT_LEFT: Void Quarter (Development) — mid distance
       {
         id: 'dist-front-left',
-        name: 'Celestial Quarter',
+        name: 'Void Quarter',
         zone: 'FRONT_LEFT',
         activationPhase: 'DEVELOPMENT',
         hasPlatform: true,
-        platformRadius: 1.1,
+        platformRadius: 1.5,
         buildings: [
-          { type: 'TYPE_C', relPos: [-0.15, 0.0, -0.25], scale: 1.0, color: 0x9560d8 },
-          { type: 'TYPE_D', relPos: [0.35, 0.0, 0.15], scale: 0.95, color: 0x75d5e5 },
+          { type: 'TYPE_C', relPos: [-0.2, 0.0, -0.3], scale: 1.35, color: 0xb89040 }, // Gold tower
+          { type: 'TYPE_D', relPos: [0.5, 0.0, 0.2], scale: 1.1, color: 0x2a6060 },
         ],
         connections: [
-          { from: [-0.15, 0, -0.25], to: [0.35, 0, 0.15], width: 0.14 },
+          { from: [-0.2, 0, -0.3], to: [0.5, 0, 0.2], width: 0.18 },
         ],
       },
 
-      // 4. RIGHT: Harmonic Promenade (Build)
+      // 4. RIGHT: Harmonic Promenade (Build) — far distance, tall structures
       {
         id: 'dist-right',
         name: 'Harmonic Promenade',
         zone: 'RIGHT',
         activationPhase: 'BUILD',
         hasPlatform: true,
-        platformRadius: 1.35,
+        platformRadius: 2.0,
         buildings: [
-          { type: 'TYPE_C', relPos: [0.2, 0.0, -0.4], scale: 1.2, color: 0xaa70e5 },
-          { type: 'TYPE_B', relPos: [-0.3, 0.0, 0.3], scale: 1.1, color: 0xda85b5 },
-          { type: 'TYPE_E', relPos: [0.0, 0.0, 0.0], rotY: Math.PI * 0.5, scale: 1.0 },
+          { type: 'TYPE_C', relPos: [0.3, 0.0, -0.6], scale: 2.0, color: 0x4a8898 }, // Tall teal spire
+          { type: 'TYPE_C', relPos: [-0.5, 0.0, 0.5], scale: 1.6, color: 0x2a6070 },
+          { type: 'TYPE_E', relPos: [0.0, 0.0, 0.0], rotY: Math.PI * 0.5, scale: 1.5 },
         ],
         connections: [
-          { from: [-0.3, 0, 0.3], to: [0.2, 0, -0.4], width: 0.16 },
+          { from: [-0.5, 0, 0.5], to: [0.3, 0, -0.6], width: 0.22 },
         ],
       },
 
-      // 5. LEFT: Whisper Sanctuary (Build)
+      // 5. LEFT: Void Sanctuary (Build) — far distance
       {
         id: 'dist-left',
-        name: 'Whisper Sanctuary',
+        name: 'Void Sanctuary',
         zone: 'LEFT',
         activationPhase: 'BUILD',
         hasPlatform: true,
-        platformRadius: 1.35,
+        platformRadius: 2.0,
         buildings: [
-          { type: 'TYPE_D', relPos: [-0.2, 0.0, -0.35], scale: 1.15, color: 0x62cce0 },
-          { type: 'TYPE_B', relPos: [0.3, 0.0, 0.35], scale: 1.05, color: 0x9a75dd },
-          { type: 'TYPE_A', relPos: [-0.35, 0.0, 0.4], scale: 0.95, color: 0x82b4ff },
+          { type: 'TYPE_D', relPos: [-0.3, 0.0, -0.5], scale: 1.8, color: 0x3a9090 },
+          { type: 'TYPE_C', relPos: [0.5, 0.0, 0.5], scale: 1.6, color: 0xb89040 }, // Gold tower
+          { type: 'TYPE_A', relPos: [-0.6, 0.0, 0.6], scale: 1.2, color: 0x2a5060 },
         ],
         connections: [
-          { from: [-0.35, 0, 0.4], to: [0.3, 0, 0.35], width: 0.14 },
+          { from: [-0.6, 0, 0.6], to: [0.5, 0, 0.5], width: 0.20 },
         ],
       },
 
-      // 6. BACK_RIGHT: Starlight Viaduct (Build)
+      // 6. BACK_RIGHT: Starlight Viaduct (Build) — very far
       {
         id: 'dist-back-right',
         name: 'Starlight Viaduct',
         zone: 'BACK_RIGHT',
         activationPhase: 'BUILD',
         hasPlatform: true,
-        platformRadius: 1.4,
+        platformRadius: 2.2,
         buildings: [
-          { type: 'TYPE_C', relPos: [0.3, 0.0, 0.2], scale: 1.3, color: 0xc882e0 },
-          { type: 'TYPE_E', relPos: [-0.2, 0.0, -0.3], rotY: Math.PI * 0.35, scale: 1.1 },
+          { type: 'TYPE_C', relPos: [0.4, 0.0, 0.3], scale: 2.2, color: 0x4a8898 }, // Large teal pillar
+          { type: 'TYPE_E', relPos: [-0.3, 0.0, -0.5], rotY: Math.PI * 0.35, scale: 1.8 },
         ],
       },
 
-      // 7. BACK_LEFT: Horizon Cascades (Build)
+      // 7. BACK_LEFT: Horizon Cascades (Build) — very far
       {
         id: 'dist-back-left',
         name: 'Horizon Cascades',
         zone: 'BACK_LEFT',
         activationPhase: 'BUILD',
         hasPlatform: true,
-        platformRadius: 1.4,
+        platformRadius: 2.2,
         buildings: [
-          { type: 'TYPE_D', relPos: [-0.2, 0.0, 0.2], scale: 1.25, color: 0x58bce8 },
-          { type: 'TYPE_B', relPos: [0.3, 0.0, -0.2], scale: 1.1, color: 0x9070d8 },
+          { type: 'TYPE_D', relPos: [-0.3, 0.0, 0.3], scale: 2.0, color: 0x2a7070 },
+          { type: 'TYPE_C', relPos: [0.5, 0.0, -0.3], scale: 1.8, color: 0xb89040 }, // Distant gold
         ],
       },
 
-      // 8. BACK: Monumental Horizon Towers (Climax)
+      // 8. BACK: Monumental Horizon Towers (Climax) — 8m away, towering silhouettes
       {
         id: 'dist-back',
         name: 'Monumental Horizon',
         zone: 'BACK',
         activationPhase: 'CLIMAX',
         hasPlatform: true,
-        platformRadius: 1.8,
+        platformRadius: 3.5,
         buildings: [
-          { type: 'TYPE_C', relPos: [0.0, 0.0, 0.0], scale: 1.8, color: 0xffd080 }, // Grand Spire
-          { type: 'TYPE_C', relPos: [-0.85, 0.0, -0.3], scale: 1.45, color: 0xcca0ff },
-          { type: 'TYPE_C', relPos: [0.85, 0.0, -0.3], scale: 1.45, color: 0xcca0ff },
+          { type: 'TYPE_C', relPos: [0.0, 0.0, 0.0], scale: 5.0, color: 0xd0b060 },  // Grand gold spire — monumental
+          { type: 'TYPE_C', relPos: [-2.0, 0.0, -0.5], scale: 3.5, color: 0x4a8898 }, // Teal flanking tower
+          { type: 'TYPE_C', relPos: [2.0, 0.0, -0.5], scale: 3.5, color: 0x4a8898 },  // Teal flanking tower
+          { type: 'TYPE_C', relPos: [-4.0, 0.0, -1.0], scale: 2.5, color: 0x2a5060 }, // Distant silhouette
+          { type: 'TYPE_C', relPos: [4.0, 0.0, -1.0], scale: 2.5, color: 0x2a5060 },  // Distant silhouette
         ],
       },
 
-      // 9. UPPER_FIELD: Celestial Canopy Arches (Climax)
+      // 9. UPPER_FIELD: Celestial Canopy Arches (Climax) — high in the sky
       {
         id: 'dist-upper',
         name: 'Celestial Canopy',
@@ -319,8 +323,9 @@ export class CitySystem {
         activationPhase: 'CLIMAX',
         hasPlatform: false,
         buildings: [
-          { type: 'TYPE_E', relPos: [-1.2, 0.0, 0.0], rotY: 0.2, scale: 1.8, color: 0xffe2a0 },
-          { type: 'TYPE_E', relPos: [1.2, 0.0, 0.0], rotY: -0.2, scale: 1.8, color: 0xffe2a0 },
+          { type: 'TYPE_E', relPos: [-2.0, 0.0, 0.0], rotY: 0.2, scale: 3.5, color: 0xc8a840 }, // Gold arch
+          { type: 'TYPE_E', relPos: [2.0, 0.0, 0.0], rotY: -0.2, scale: 3.5, color: 0xc8a840 },  // Gold arch
+          { type: 'TYPE_E', relPos: [0.0, 0.0, -1.5], rotY: 0.0, scale: 4.0, color: 0x4a8898 },  // Center teal arch
         ],
       },
     ];

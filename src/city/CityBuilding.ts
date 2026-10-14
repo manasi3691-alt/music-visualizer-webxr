@@ -342,11 +342,11 @@ export class CityBuilding {
   private createBodyMaterial(colorHex: number, opacity: number): MeshPhysicalMaterial {
     const mat = new MeshPhysicalMaterial({
       color: colorHex,
-      emissive: 0x141f38,
-      emissiveIntensity: 0.4,
-      roughness: 0.18,
-      metalness: 0.12,
-      transmission: 0.4,
+      emissive: 0x08111e,   // Deep charcoal-navy (replaces blue-purple)
+      emissiveIntensity: 0.35,
+      roughness: 0.22,
+      metalness: 0.15,
+      transmission: 0.35,
       transparent: true,
       opacity,
       depthWrite: true,

@@ -1,23 +1,18 @@
 /**
- * WristUI: Procedural holographic control panel.
- * Task 3 — Open/close animation.
- * Task 5 — Live data wiring: updateStatus(), updateProgress(), getHitTestMeshes().
+ * WristUI: Circular radial holographic control panel.
  *
- * Requirements:
- * - Rounded rectangular panel (dimensions ~0.09 x 0.13 x 0.005 m, triangle count < 1500)
- * - Translucent MeshPhysicalMaterial with transparent: true, opacity from WristUIStyles
- * - Thin emissive border (edge loop, not a shader)
- * - Five rounded button meshes with placeholder labels (< 400 triangles per button):
- *     1. PLAY / PAUSE
- *     2. RESTART
- *     3. STATUS (read-only indicator)
- *     4. PROGRESS (read-only bar)
- *     5. CLOSE
- * - Soft gradient via vertex colors or overlay plane (no custom GLSL)
- * - open() and close() animate opacity 0<->1 and scale 0.92<->1.0 over 180-250 ms (open) / 150-220 ms (close)
- * - Use existing render loop's delta time (dt). No setTimeout / setInterval.
- * - Use ease-out cubic.
- * - State transitions handled via WristUIState (OPEN, CLOSED, TRANSITIONING).
+ * Layout:
+ *   Center:           PLAY / PAUSE  (large circular button)
+ *   Top:              PROGRESS arc
+ *   Top-Left  30°:    REWIND 10s
+ *   Top-Right 330°:   FORWARD 10s
+ *   Right     90°:    VOLUME +
+ *   Left      270°:   VOLUME -
+ *   Bottom-Left 210°: RESTART
+ *   Bottom-Right 150°: CLOSE
+ *
+ * Animation: ease-out cubic scale+opacity 0↔1 over 180-220ms.
+ * All materials/geometries tracked for clean disposal.
  */
 
 import {
@@ -34,7 +29,9 @@ import {
   Float32BufferAttribute,
   CanvasTexture,
   Color,
-  PlaneGeometry,
+  RingGeometry,
+  CircleGeometry,
+  TorusGeometry,
 } from '@iwsdk/core';
 import { WristUIState } from './WristUIState.js';
 import {
@@ -45,80 +42,76 @@ import {
 } from './WristUIStyles.js';
 
 export interface UIControlMesh {
-  id: 'playPause' | 'restart' | 'status' | 'progress' | 'close';
+  id: 'playPause' | 'restart' | 'status' | 'progress' | 'close' | 'rewind' | 'forward' | 'volUp' | 'volDown';
   mesh: Mesh;
   labelTexture: CanvasTexture | null;
 }
+
+// Interactive button IDs (exclude read-only: status, progress)
+type InteractiveControlId = 'playPause' | 'restart' | 'close' | 'rewind' | 'forward' | 'volUp' | 'volDown';
 
 export class WristUI {
   readonly group: Group;
   private _state: WristUIState = WristUIState.CLOSED;
 
-  // Animation transition state
   private targetOpen = false;
-  private transitionProgress = 0.0; // 0.0 = fully closed, 1.0 = fully open
+  private transitionProgress = 0.0;
 
-  // Root container for all procedural panel visual assets
   private panelContainer: Group = new Group();
 
-  // Primary panel geometry & materials
+  // Panel geometry & materials
   private panelMesh: Mesh | null = null;
   private panelMaterial: MeshPhysicalMaterial | null = null;
-  private borderLine: LineLoop | null = null;
-  private borderMaterial: LineBasicMaterial | null = null;
-  private gradientOverlay: Mesh | null = null;
-  private gradientMaterial: MeshBasicMaterial | null = null;
+  private borderLine: Mesh | null = null;
+  private borderMaterial: MeshBasicMaterial | null = null;
 
-  // Control meshes & materials for opacity modulation
+  // Inner glow ring
+  private glowRingMesh: Mesh | null = null;
+  private glowRingMaterial: MeshBasicMaterial | null = null;
+
+  // Progress arc canvas
+  private progressCanvas: HTMLCanvasElement | null = null;
+  private progressTexture: CanvasTexture | null = null;
+  private progressMesh: Mesh | null = null;
+  private _lastProgressPct = -1;
+
+  // Status canvas
+  private statusCanvas: HTMLCanvasElement | null = null;
+  private statusTexture: CanvasTexture | null = null;
+  private _lastStatusLabel = '';
+
+  // Play/pause canvas (live-updated for play state)
+  private playPauseCanvas: HTMLCanvasElement | null = null;
+  private playPauseTexture: CanvasTexture | null = null;
+  private _lastIsPlaying: boolean | null = null;
+
+  // Controls
   private controls: Map<string, UIControlMesh> = new Map();
   private controlMaterials: { material: MeshPhysicalMaterial | MeshBasicMaterial; baseOpacity: number }[] = [];
 
-  // Live data caches to avoid redundant texture redraws
-  private _lastStatusLabel = '';
-  private _lastProgressPct = -1;
-
-  // Canvases for live-update controls (kept alive for texture redraw)
-  private statusCanvas: HTMLCanvasElement | null = null;
-  private statusTexture: CanvasTexture | null = null;
-  private progressCanvas: HTMLCanvasElement | null = null;
-  private progressTexture: CanvasTexture | null = null;
-
-  // Disposables tracking for clean teardown
+  // Disposal tracking
   private disposableGeometries: BufferGeometry[] = [];
   private disposableMaterials: (MeshPhysicalMaterial | MeshBasicMaterial | LineBasicMaterial)[] = [];
   private disposableTextures: CanvasTexture[] = [];
 
   constructor(group: Group) {
     this.group = group;
-
-    // Build the procedural 3D holographic panel
     this.buildPanel();
-
-    // Attach to provided parent group
     this.group.add(this.panelContainer);
-
-    // Initial state: fully closed (hidden, opacity 0, scale 0.92)
     this.applyTransition(0.0);
     this.group.visible = false;
   }
 
-  get state(): WristUIState {
-    return this._state;
-  }
-
+  get state(): WristUIState { return this._state; }
   get isOpen(): boolean {
     return this._state === WristUIState.OPEN || (this._state === WristUIState.TRANSITIONING && this.targetOpen);
   }
-
   get isClosed(): boolean {
     return this._state === WristUIState.CLOSED || (this._state === WristUIState.TRANSITIONING && !this.targetOpen);
   }
+  get panelGroup(): Group { return this.panelContainer; }
 
-  get panelGroup(): Group {
-    return this.panelContainer;
-  }
-
-  getControl(id: 'playPause' | 'restart' | 'status' | 'progress' | 'close'): UIControlMesh | undefined {
+  getControl(id: UIControlMesh['id']): UIControlMesh | undefined {
     return this.controls.get(id);
   }
 
@@ -126,14 +119,9 @@ export class WristUI {
     return Array.from(this.controls.values());
   }
 
-  /**
-   * Returns the interactive button meshes for raycaster-based hit detection.
-   * Only PLAY/PAUSE, RESTART, and CLOSE are interactive.
-   * STATUS and PROGRESS are read-only indicators.
-   */
-  getHitTestMeshes(): { mesh: Mesh; id: 'playPause' | 'restart' | 'close' }[] {
-    const result: { mesh: Mesh; id: 'playPause' | 'restart' | 'close' }[] = [];
-    const ids = ['playPause', 'restart', 'close'] as const;
+  getHitTestMeshes(): { mesh: Mesh; id: InteractiveControlId }[] {
+    const result: { mesh: Mesh; id: InteractiveControlId }[] = [];
+    const ids: InteractiveControlId[] = ['playPause', 'restart', 'close', 'rewind', 'forward', 'volUp', 'volDown'];
     for (const id of ids) {
       const ctrl = this.controls.get(id);
       if (ctrl) result.push({ mesh: ctrl.mesh, id });
@@ -141,129 +129,53 @@ export class WristUI {
     return result;
   }
 
-  /**
-   * Live-updates the STATUS indicator canvas texture.
-   * Debounced: only redraws if the label has changed.
-   */
+  // ─── Live updates ──────────────────────────────────────────────────────────
+
   updateStatus(label: string): void {
     if (label === this._lastStatusLabel) return;
     this._lastStatusLabel = label;
     if (!this.statusCanvas || !this.statusTexture) return;
-
-    const canvas = this.statusCanvas;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const cw = canvas.width;
-    const ch = canvas.height;
-    ctx.clearRect(0, 0, cw, ch);
-
-    ctx.fillStyle = 'rgba(167, 139, 250, 0.20)';
-    ctx.strokeStyle = 'rgba(196, 181, 253, 0.40)';
-    ctx.lineWidth = 2;
-    this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 12);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = WRIST_UI_PALETTE.hex.warmWhite;
-    ctx.font = '600 24px -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`STATUS: ${label}`, cw / 2, ch / 2);
-
+    this.redrawStatus(this.statusCanvas, label);
     this.statusTexture.needsUpdate = true;
   }
 
-  /**
-   * Live-updates the PROGRESS bar canvas texture.
-   * Debounced: only redraws when pct changes by ≥ 0.005 (0.5%).
-   * @param pct — 0.0 to 1.0
-   */
   updateProgress(pct: number): void {
     const clamped = Math.max(0, Math.min(1, pct));
-    if (Math.abs(clamped - this._lastProgressPct) < 0.005) return;
+    if (Math.abs(clamped - this._lastProgressPct) < 0.004) return;
     this._lastProgressPct = clamped;
     if (!this.progressCanvas || !this.progressTexture) return;
-
-    const canvas = this.progressCanvas;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const cw = canvas.width;
-    const ch = canvas.height;
-    ctx.clearRect(0, 0, cw, ch);
-
-    // Background track
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-    ctx.strokeStyle = 'rgba(196, 181, 253, 0.30)';
-    ctx.lineWidth = 2;
-    this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 12);
-    ctx.fill();
-    ctx.stroke();
-
-    // Progress fill bar
-    const trackPad = 8;
-    const trackH = ch * 0.3;
-    const trackY = ch * 0.55;
-    const trackW = cw - trackPad * 2;
-    ctx.fillStyle = WRIST_UI_PALETTE.hex.progressTrack;
-    this.roundRectCanvas(ctx, trackPad, trackY, trackW, trackH, 3);
-    ctx.fill();
-
-    if (clamped > 0.01) {
-      ctx.fillStyle = WRIST_UI_PALETTE.hex.progressFill;
-      this.roundRectCanvas(ctx, trackPad, trackY, trackW * clamped, trackH, 3);
-      ctx.fill();
-    }
-
-    const pctStr = `${Math.round(clamped * 100)}%`;
-    ctx.fillStyle = WRIST_UI_PALETTE.hex.textMuted;
-    ctx.font = '500 22px -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText(`PROGRESS: ${pctStr}`, cw / 2, trackY - 4);
-
+    this.redrawProgress(this.progressCanvas, clamped);
     this.progressTexture.needsUpdate = true;
   }
 
-  /**
-   * Opens the panel with smooth ease-out cubic animation
-   */
+  /** Updates the central play/pause button to reflect actual playback state */
+  updatePlayState(isPlaying: boolean): void {
+    if (isPlaying === this._lastIsPlaying) return;
+    this._lastIsPlaying = isPlaying;
+    if (!this.playPauseCanvas || !this.playPauseTexture) return;
+    this.redrawPlayPause(this.playPauseCanvas, isPlaying);
+    this.playPauseTexture.needsUpdate = true;
+  }
+
+  // ─── Panel lifecycle ───────────────────────────────────────────────────────
+
   open(): void {
-    if (this._state === WristUIState.OPEN && this.transitionProgress >= 1.0) {
-      return;
-    }
+    if (this._state === WristUIState.OPEN && this.transitionProgress >= 1.0) return;
     this.targetOpen = true;
     this._state = WristUIState.TRANSITIONING;
     this.group.visible = true;
   }
 
-  /**
-   * Closes the panel with smooth ease-out cubic animation
-   */
   close(): void {
-    if (this._state === WristUIState.CLOSED && this.transitionProgress <= 0.0) {
-      return;
-    }
+    if (this._state === WristUIState.CLOSED && this.transitionProgress <= 0.0) return;
     this.targetOpen = false;
     this._state = WristUIState.TRANSITIONING;
   }
 
-  /**
-   * Toggles panel between open and closed
-   */
   toggle(): void {
-    if (this.isOpen) {
-      this.close();
-    } else {
-      this.open();
-    }
+    if (this.isOpen) this.close(); else this.open();
   }
 
-  /**
-   * Advances open/close animation over delta time (dt) in seconds.
-   * Driven strictly by the render loop (no setTimeout/setInterval).
-   */
   update(dt: number): void {
     if (this._state === WristUIState.TRANSITIONING) {
       if (this.targetOpen) {
@@ -284,500 +196,430 @@ export class WristUI {
     }
   }
 
-  /**
-   * Applies ease-out cubic curve to scale (0.92 <-> 1.0) and opacity (0.0 <-> 1.0).
-   * Ease-out cubic: 1 - (1 - t)^3
-   */
-  private applyTransition(t: number): void {
-    const clampedT = Math.max(0, Math.min(1, t));
-    const inv = 1 - clampedT;
-    const eased = 1 - inv * inv * inv;
+  // ─── Transition ────────────────────────────────────────────────────────────
 
-    // 1. Scale animation: 0.92 <-> 1.0
+  private applyTransition(t: number): void {
+    const cT = Math.max(0, Math.min(1, t));
+    const inv = 1 - cT;
+    const eased = 1 - inv * inv * inv; // ease-out cubic
+
     const minS = WRIST_UI_DIMENSIONS.minScale;
     const maxS = WRIST_UI_DIMENSIONS.maxScale;
-    const currentScale = minS + (maxS - minS) * eased;
-    this.group.scale.set(currentScale, currentScale, currentScale);
+    const s = minS + (maxS - minS) * eased;
+    this.group.scale.set(s, s, s);
 
-    // 2. Opacity animation: 0 <-> 1
-    if (this.panelMaterial) {
-      this.panelMaterial.opacity = WRIST_UI_OPACITY.open * eased;
-    }
-    if (this.borderMaterial) {
-      this.borderMaterial.opacity = 0.75 * eased;
-    }
-    if (this.gradientMaterial) {
-      this.gradientMaterial.opacity = 0.25 * eased;
-    }
+    if (this.panelMaterial) this.panelMaterial.opacity = WRIST_UI_OPACITY.open * eased;
+    if (this.borderMaterial) this.borderMaterial.opacity = 0.80 * eased;
+    if (this.glowRingMaterial) this.glowRingMaterial.opacity = 0.35 * eased;
+
     for (const entry of this.controlMaterials) {
       entry.material.opacity = entry.baseOpacity * eased;
     }
   }
 
-  /**
-   * Constructs procedural rounded rectangle shape
-   */
-  private createRoundedRectShape(w: number, h: number, r: number): Shape {
-    const shape = new Shape();
-    const x = -w / 2;
-    const y = -h / 2;
-    shape.moveTo(x + r, y);
-    shape.lineTo(x + w - r, y);
-    shape.quadraticCurveTo(x + w, y, x + w, y + r);
-    shape.lineTo(x + w, y + h - r);
-    shape.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    shape.lineTo(x + r, y + h);
-    shape.quadraticCurveTo(x, y + h, x, y + h - r);
-    shape.lineTo(x, y + r);
-    shape.quadraticCurveTo(x, y, x + r, y);
-    return shape;
+  // ─── Panel construction ────────────────────────────────────────────────────
+
+  private buildPanel(): void {
+    const r = WRIST_UI_DIMENSIONS.radius;
+    const d = WRIST_UI_DIMENSIONS.depth;
+    const zFront = d * 0.5 + 0.001;
+
+    // 1. Base circular panel (disc extrusion)
+    const discShape = new Shape();
+    discShape.absarc(0, 0, r, 0, Math.PI * 2, false);
+    const extrudeSettings = {
+      depth: d,
+      bevelEnabled: true,
+      bevelSegments: 2,
+      bevelSize: 0.0008,
+      bevelThickness: 0.0008,
+      curveSegments: 32,
+    };
+    const panelGeo = new ExtrudeGeometry(discShape, extrudeSettings);
+    panelGeo.center();
+    this.disposableGeometries.push(panelGeo);
+
+    this.panelMaterial = new MeshPhysicalMaterial({
+      color: new Color(WRIST_UI_PALETTE.panelBase),
+      transparent: true,
+      opacity: WRIST_UI_OPACITY.open,
+      roughness: 0.08,
+      metalness: 0.20,
+      transmission: 0.35,
+      ior: 1.4,
+      reflectivity: 0.5,
+    });
+    this.disposableMaterials.push(this.panelMaterial);
+
+    this.panelMesh = new Mesh(panelGeo, this.panelMaterial);
+    this.panelMesh.name = 'WristUI_BasePanel';
+    this.panelContainer.add(this.panelMesh);
+
+    // 2. Border torus ring (glowing outer edge)
+    const torusGeo = new TorusGeometry(r, 0.0015, 8, 48);
+    this.disposableGeometries.push(torusGeo);
+    this.borderMaterial = new MeshBasicMaterial({
+      color: new Color(WRIST_UI_PALETTE.borderEmissive),
+      transparent: true,
+      opacity: 0.80,
+    });
+    this.disposableMaterials.push(this.borderMaterial);
+    this.borderLine = new Mesh(torusGeo, this.borderMaterial);
+    this.borderLine.name = 'WristUI_Border';
+    this.borderLine.position.z = d * 0.5 + 0.0005;
+    this.panelContainer.add(this.borderLine);
+
+    // 3. Inner glow ring (subtle, smaller torus)
+    const innerTorusGeo = new TorusGeometry(r * 0.75, 0.001, 8, 48);
+    this.disposableGeometries.push(innerTorusGeo);
+    this.glowRingMaterial = new MeshBasicMaterial({
+      color: new Color(WRIST_UI_PALETTE.tealAccent),
+      transparent: true,
+      opacity: 0.35,
+    });
+    this.disposableMaterials.push(this.glowRingMaterial);
+    this.glowRingMesh = new Mesh(innerTorusGeo, this.glowRingMaterial);
+    this.glowRingMesh.position.z = zFront;
+    this.panelContainer.add(this.glowRingMesh);
+
+    // 4. Build all controls
+    this.buildCenterPlayPause(zFront + 0.001);
+    this.buildProgressArc(zFront + 0.001);
+    this.buildRadialButtons(zFront + 0.001);
+    this.buildStatusLabel(zFront + 0.001);
   }
 
-  /**
-   * Generates a 2D canvas texture with text label and optional background/border
-   */
-  private createLabelTexture(
-    widthPx: number,
-    heightPx: number,
-    drawFn: (ctx: CanvasRenderingContext2D, w: number, h: number) => void
-  ): CanvasTexture {
+  // ─── Center: Play/Pause ────────────────────────────────────────────────────
+
+  private buildCenterPlayPause(z: number): void {
+    const br = WRIST_UI_DIMENSIONS.centerButtonRadius;
+    const geo = new CircleGeometry(br, 32);
+    this.disposableGeometries.push(geo);
+
     const canvas = document.createElement('canvas');
-    canvas.width = widthPx;
-    canvas.height = heightPx;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      drawFn(ctx, widthPx, heightPx);
+    canvas.width = 128; canvas.height = 128;
+    this.playPauseCanvas = canvas;
+    this.redrawPlayPause(canvas, false);
+    const texture = new CanvasTexture(canvas);
+    texture.generateMipmaps = true;
+    this.playPauseTexture = texture;
+    this.disposableTextures.push(texture);
+
+    const mat = new MeshPhysicalMaterial({
+      map: texture,
+      color: new Color(0xffffff),
+      transparent: true,
+      opacity: 0.98,
+      roughness: 0.15,
+      metalness: 0.1,
+      emissive: new Color(WRIST_UI_PALETTE.tealAccent),
+      emissiveIntensity: WRIST_UI_EMISSIVE.buttonNormalIntensity,
+    });
+    this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.98 });
+
+    const mesh = new Mesh(geo, mat);
+    mesh.name = 'WristUI_PlayPause';
+    mesh.position.set(0, 0, z);
+    this.panelContainer.add(mesh);
+    this.controls.set('playPause', { id: 'playPause', mesh, labelTexture: texture });
+  }
+
+  // ─── Progress arc ──────────────────────────────────────────────────────────
+
+  private buildProgressArc(z: number): void {
+    const r = WRIST_UI_DIMENSIONS.radius;
+    // Progress ring: thin arc around 270° of the panel (leaves gap at bottom for thumb comfort)
+    const arcRadius = r * 0.88;
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    this.progressCanvas = canvas;
+    this.redrawProgress(canvas, 0);
+    const texture = new CanvasTexture(canvas);
+    texture.generateMipmaps = true;
+    this.progressTexture = texture;
+    this.disposableTextures.push(texture);
+
+    // Use a flat disc as the blit target for the arc (displayed behind buttons)
+    const arcGeo = new RingGeometry(arcRadius - 0.004, arcRadius + 0.004, 64);
+    this.disposableGeometries.push(arcGeo);
+
+    // We overlay a full-disc texture with transparency
+    const fullDiscGeo = new CircleGeometry(r * 0.97, 64);
+    this.disposableGeometries.push(fullDiscGeo);
+
+    const mat = new MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    });
+    this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
+
+    this.progressMesh = new Mesh(fullDiscGeo, mat);
+    this.progressMesh.name = 'WristUI_ProgressArc';
+    this.progressMesh.position.set(0, 0, z - 0.0005); // just behind buttons
+    this.panelContainer.add(this.progressMesh);
+
+    // Progress is read-only, not interactive
+    this.controls.set('progress', { id: 'progress', mesh: this.progressMesh, labelTexture: texture });
+  }
+
+  // ─── Status label ──────────────────────────────────────────────────────────
+
+  private buildStatusLabel(z: number): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 200; canvas.height = 40;
+    this.statusCanvas = canvas;
+    this.redrawStatus(canvas, 'READY');
+    const texture = new CanvasTexture(canvas);
+    texture.generateMipmaps = true;
+    this.statusTexture = texture;
+    this.disposableTextures.push(texture);
+
+    const w = WRIST_UI_DIMENSIONS.radius * 0.8;
+    const h = w * 0.18;
+    const geo = new Shape();
+    geo.absarc(0, 0, 0, 0, 0, false); // We'll use a PlaneGeometry equivalent
+    // Use CircleGeometry-based plane
+    const planeShape = new Shape();
+    planeShape.moveTo(-w/2, -h/2);
+    planeShape.lineTo( w/2, -h/2);
+    planeShape.lineTo( w/2,  h/2);
+    planeShape.lineTo(-w/2,  h/2);
+    planeShape.closePath();
+    const planeGeo = new ShapeGeometry(planeShape, 1);
+    this.disposableGeometries.push(planeGeo);
+
+    const mat = new MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 0.90,
+      depthWrite: false,
+    });
+    this.disposableMaterials.push(mat);
+    this.controlMaterials.push({ material: mat, baseOpacity: 0.90 });
+
+    const mesh = new Mesh(planeGeo, mat);
+    mesh.name = 'WristUI_Status';
+    // Place status at bottom of panel (below center button)
+    mesh.position.set(0, -WRIST_UI_DIMENSIONS.radius * 0.55, z + 0.001);
+    this.panelContainer.add(mesh);
+    this.controls.set('status', { id: 'status', mesh, labelTexture: texture });
+  }
+
+  // ─── Radial buttons ────────────────────────────────────────────────────────
+
+  private buildRadialButtons(z: number): void {
+    type RadialConfig = {
+      id: InteractiveControlId;
+      label: string;
+      icon: string;
+      angleDeg: number;
+      color: number;
+    };
+
+    const configs: RadialConfig[] = [
+      { id: 'rewind',  label: 'REWIND',   icon: '⏮ 10',  angleDeg: 150, color: WRIST_UI_PALETTE.tealAccent },
+      { id: 'forward', label: 'FORWARD',  icon: '10 ⏭',  angleDeg: 30,  color: WRIST_UI_PALETTE.tealAccent },
+      { id: 'volUp',   label: 'VOL +',    icon: '🔊+',   angleDeg: 330, color: WRIST_UI_PALETTE.goldAccent },
+      { id: 'volDown', label: 'VOL -',    icon: '🔉-',   angleDeg: 210, color: WRIST_UI_PALETTE.goldAccent },
+      { id: 'restart', label: 'RESTART',  icon: '↺',     angleDeg: 250, color: WRIST_UI_PALETTE.buttonBase },
+      { id: 'close',   label: 'CLOSE',    icon: '✕',     angleDeg: 110, color: WRIST_UI_PALETTE.closeButton },
+    ];
+
+    const orbit = WRIST_UI_DIMENSIONS.radialOrbitRadius;
+    const br    = WRIST_UI_DIMENSIONS.radialButtonRadius;
+
+    for (const cfg of configs) {
+      const angleRad = (cfg.angleDeg * Math.PI) / 180;
+      const bx = Math.cos(angleRad) * orbit;
+      const by = Math.sin(angleRad) * orbit;
+
+      const geo = new CircleGeometry(br, 24);
+      this.disposableGeometries.push(geo);
+
+      const texture = this.createButtonTexture(cfg.icon, cfg.label, cfg.color);
+
+      const mat = new MeshPhysicalMaterial({
+        map: texture,
+        color: new Color(0xffffff),
+        transparent: true,
+        opacity: 0.96,
+        roughness: 0.20,
+        metalness: 0.08,
+        emissive: new Color(cfg.color),
+        emissiveIntensity: WRIST_UI_EMISSIVE.buttonNormalIntensity,
+      });
+      this.disposableMaterials.push(mat);
+      this.controlMaterials.push({ material: mat, baseOpacity: 0.96 });
+
+      const mesh = new Mesh(geo, mat);
+      mesh.name = `WristUI_${cfg.id}`;
+      mesh.position.set(bx, by, z);
+      this.panelContainer.add(mesh);
+
+      this.controls.set(cfg.id, { id: cfg.id, mesh, labelTexture: texture });
     }
+  }
+
+  // ─── Canvas drawing helpers ────────────────────────────────────────────────
+
+  private createButtonTexture(icon: string, label: string, colorHex: number): CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+
+    // Extract RGB from hex
+    const r = ((colorHex >> 16) & 0xff) / 255;
+    const g = ((colorHex >> 8) & 0xff) / 255;
+    const b = (colorHex & 0xff) / 255;
+
+    // Background circle with subtle glow
+    ctx.beginPath();
+    ctx.arc(64, 64, 58, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(r*255)}, ${Math.round(g*255)}, ${Math.round(b*255)}, 0.60)`;
+    ctx.fill();
+
+    // Border ring
+    ctx.beginPath();
+    ctx.arc(64, 64, 58, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${Math.round(r*255+40)}, ${Math.round(g*255+40)}, ${Math.round(b*255+40)}, 0.85)`;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Icon
+    ctx.fillStyle = WRIST_UI_PALETTE.hex.ivoryText;
+    ctx.font = 'bold 32px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon, 64, 58);
+
+    // Label (small, below icon)
+    ctx.fillStyle = WRIST_UI_PALETTE.hex.textMuted;
+    ctx.font = '500 16px -apple-system, sans-serif';
+    ctx.fillText(label, 64, 96);
+
     const texture = new CanvasTexture(canvas);
     texture.generateMipmaps = true;
     this.disposableTextures.push(texture);
     return texture;
   }
 
-  /**
-   * Builds the procedural panel, border, gradient, and 5 control buttons
-   */
-  private buildPanel(): void {
-    const w = WRIST_UI_DIMENSIONS.width;
-    const h = WRIST_UI_DIMENSIONS.height;
-    const depth = WRIST_UI_DIMENSIONS.depth;
-    const r = WRIST_UI_DIMENSIONS.cornerRadius;
-
-    // 1. Base Panel (Extruded rounded rectangle, < 1500 triangles)
-    const panelShape = this.createRoundedRectShape(w, h, r);
-    const extrudeSettings = {
-      depth: depth * 0.7,
-      bevelEnabled: true,
-      bevelSegments: 2,
-      bevelSize: 0.001,
-      bevelThickness: 0.001,
-      curveSegments: 8,
-    };
-    const panelGeometry = new ExtrudeGeometry(panelShape, extrudeSettings);
-    // Center geometry along Z so front surface is approximately z = 0
-    panelGeometry.center();
-    this.disposableGeometries.push(panelGeometry);
-
-    this.panelMaterial = new MeshPhysicalMaterial({
-      color: new Color(WRIST_UI_PALETTE.deepBackground),
-      transparent: true,
-      opacity: WRIST_UI_OPACITY.open,
-      roughness: 0.25,
-      metalness: 0.12,
-      transmission: 0.25,
-      ior: 1.3,
-      reflectivity: 0.4,
-    });
-    this.disposableMaterials.push(this.panelMaterial);
-
-    this.panelMesh = new Mesh(panelGeometry, this.panelMaterial);
-    this.panelMesh.name = 'WristUI_BasePanel';
-    this.panelContainer.add(this.panelMesh);
-
-    // 2. Emissive Border (Edge loop line geometry, not a shader)
-    const borderPoints = panelShape.getPoints(12);
-    const borderGeometry = new BufferGeometry().setFromPoints(borderPoints);
-    this.disposableGeometries.push(borderGeometry);
-
-    this.borderMaterial = new LineBasicMaterial({
-      color: new Color(WRIST_UI_PALETTE.borderEmissive),
-      transparent: true,
-      opacity: 0.75,
-      linewidth: 1,
-    });
-    this.disposableMaterials.push(this.borderMaterial);
-
-    this.borderLine = new LineLoop(borderGeometry, this.borderMaterial);
-    this.borderLine.name = 'WristUI_EmissiveBorder';
-    this.borderLine.position.z = depth * 0.5 + 0.0005; // Slightly in front of front face
-    this.panelContainer.add(this.borderLine);
-
-    // 3. Soft Gradient Overlay Plane (Vertex colors: soft lavender -> deep violet)
-    const gradW = w - 0.003;
-    const gradH = h - 0.003;
-    const gradGeometry = new PlaneGeometry(gradW, gradH, 1, 1);
-    this.disposableGeometries.push(gradGeometry);
-
-    // Vertex colors: top lavender/pale blue, bottom subtle deep violet
-    const colorTop = new Color(WRIST_UI_PALETTE.softLavender);
-    const colorBottom = new Color(WRIST_UI_PALETTE.deepBackground);
-    const colors = new Float32Array([
-      colorTop.r, colorTop.g, colorTop.b,       // top left
-      colorTop.r, colorTop.g, colorTop.b,       // top right
-      colorBottom.r, colorBottom.g, colorBottom.b, // bottom left
-      colorBottom.r, colorBottom.g, colorBottom.b, // bottom right
-    ]);
-    gradGeometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
-
-    this.gradientMaterial = new MeshBasicMaterial({
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.25,
-      depthWrite: false,
-    });
-    this.disposableMaterials.push(this.gradientMaterial);
-
-    this.gradientOverlay = new Mesh(gradGeometry, this.gradientMaterial);
-    this.gradientOverlay.name = 'WristUI_GradientOverlay';
-    this.gradientOverlay.position.z = depth * 0.5 + 0.0006;
-    this.panelContainer.add(this.gradientOverlay);
-
-    // 4. Five Rounded Button Meshes with placeholder labels (< 400 triangles each)
-    const zOffset = depth * 0.5 + 0.0012; // In front of gradient
-    this.createControls(zOffset);
-  }
-
-  /**
-   * Creates the 5 required controls:
-   * 1. PLAY / PAUSE
-   * 2. RESTART
-   * 3. STATUS (read-only indicator)
-   * 4. PROGRESS (read-only bar)
-   * 5. CLOSE
-   */
-  private createControls(zPos: number): void {
-    // Control 3: STATUS (top left, read-only indicator)
-    this.createStatusIndicator(zPos);
-
-    // Control 5: CLOSE (top right, round button)
-    this.createCloseButton(zPos);
-
-    // Control 4: PROGRESS (middle-upper, read-only bar)
-    this.createProgressBar(zPos);
-
-    // Control 1: PLAY / PAUSE (middle-lower)
-    this.createPlayPauseButton(zPos);
-
-    // Control 2: RESTART (bottom)
-    this.createRestartButton(zPos);
-  }
-
-  /**
-   * Control 3: STATUS Indicator (read-only, live-updatable)
-   * Position: Top-left (x: -0.013, y: 0.046), Size: 0.054 x 0.018 m
-   */
-  private createStatusIndicator(zPos: number): void {
-    const w = 0.054;
-    const h = 0.018;
-    const r = 0.004;
-
-    const shape = this.createRoundedRectShape(w, h, r);
-    const geom = new ShapeGeometry(shape, 6);
-    this.disposableGeometries.push(geom);
-
-    // Keep the canvas and texture alive so updateStatus() can redraw into them
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 80;
+  private redrawPlayPause(canvas: HTMLCanvasElement, isPlaying: boolean): void {
     const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.fillStyle = 'rgba(167, 139, 250, 0.20)';
-      ctx.strokeStyle = 'rgba(196, 181, 253, 0.40)';
-      ctx.lineWidth = 2;
-      this.roundRectCanvas(ctx, 4, 4, canvas.width - 8, canvas.height - 8, 12);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = WRIST_UI_PALETTE.hex.warmWhite;
-      ctx.font = '600 24px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('STATUS: READY', canvas.width / 2, canvas.height / 2);
+    if (!ctx) return;
+    const cw = canvas.width, ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    const cx = cw / 2, cy = ch / 2, r = 56;
+
+    // Outer ring gradient
+    const grad = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r);
+    if (isPlaying) {
+      grad.addColorStop(0, 'rgba(20, 100, 80, 0.90)');
+      grad.addColorStop(1, 'rgba(10, 60, 50, 0.70)');
+    } else {
+      grad.addColorStop(0, 'rgba(14, 58, 92, 0.90)');
+      grad.addColorStop(1, 'rgba(8, 30, 50, 0.70)');
     }
-    const texture = new CanvasTexture(canvas);
-    texture.generateMipmaps = true;
-    this.statusCanvas = canvas;
-    this.statusTexture = texture;
-    this.disposableTextures.push(texture);
-
-    const mat = new MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-    });
-    this.disposableMaterials.push(mat);
-    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
-
-    const mesh = new Mesh(geom, mat);
-    mesh.name = 'WristUI_StatusIndicator';
-    mesh.position.set(-0.012, 0.046, zPos);
-    this.panelContainer.add(mesh);
-
-    this.controls.set('status', { id: 'status', mesh, labelTexture: texture });
-  }
-
-  /**
-   * Control 5: CLOSE Button
-   * Position: Top-right (x: 0.028, y: 0.046), Size: 0.018 x 0.018 m
-   */
-  private createCloseButton(zPos: number): void {
-    const w = 0.018;
-    const h = 0.018;
-    const r = 0.005;
-
-    const shape = this.createRoundedRectShape(w, h, r);
-    const geom = new ShapeGeometry(shape, 6);
-    this.disposableGeometries.push(geom);
-
-    const texture = this.createLabelTexture(128, 128, (ctx, cw, ch) => {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-      ctx.strokeStyle = 'rgba(216, 180, 254, 0.60)';
-      ctx.lineWidth = 3;
-      this.roundRectCanvas(ctx, 6, 6, cw - 12, ch - 12, 20);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = WRIST_UI_PALETTE.hex.warmWhite;
-      ctx.font = '700 48px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('✕', cw / 2, ch / 2);
-    });
-
-    const mat = new MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-    });
-    this.disposableMaterials.push(mat);
-    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
-
-    const mesh = new Mesh(geom, mat);
-    mesh.name = 'WristUI_CloseButton';
-    mesh.position.set(0.028, 0.046, zPos);
-    this.panelContainer.add(mesh);
-
-    this.controls.set('close', { id: 'close', mesh, labelTexture: texture });
-  }
-
-  /**
-   * Control 4: PROGRESS Bar (read-only, live-updatable)
-   * Position: Middle-upper (x: 0, y: 0.020), Size: 0.076 x 0.018 m
-   */
-  private createProgressBar(zPos: number): void {
-    const w = 0.076;
-    const h = 0.018;
-    const r = 0.004;
-
-    const shape = this.createRoundedRectShape(w, h, r);
-    const geom = new ShapeGeometry(shape, 6);
-    this.disposableGeometries.push(geom);
-
-    // Keep canvas alive so updateProgress() can redraw into it
-    const canvas = document.createElement('canvas');
-    canvas.width = 360;
-    canvas.height = 80;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-      ctx.strokeStyle = 'rgba(196, 181, 253, 0.30)';
-      ctx.lineWidth = 2;
-      this.roundRectCanvas(ctx, 4, 4, canvas.width - 8, canvas.height - 8, 12);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = WRIST_UI_PALETTE.hex.textMuted;
-      ctx.font = '500 22px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('PROGRESS: 0%', canvas.width / 2, canvas.height / 2);
-    }
-    const texture = new CanvasTexture(canvas);
-    texture.generateMipmaps = true;
-    this.progressCanvas = canvas;
-    this.progressTexture = texture;
-    this.disposableTextures.push(texture);
-
-    const mat = new MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-    });
-    this.disposableMaterials.push(mat);
-    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
-
-    const mesh = new Mesh(geom, mat);
-    mesh.name = 'WristUI_ProgressBar';
-    mesh.position.set(0, 0.020, zPos);
-    this.panelContainer.add(mesh);
-
-    this.controls.set('progress', { id: 'progress', mesh, labelTexture: texture });
-  }
-
-  /**
-   * Control 1: PLAY / PAUSE Button
-   * Position: Middle (x: 0, y: -0.012), Size: 0.076 x 0.026 m
-   */
-  private createPlayPauseButton(zPos: number): void {
-    const w = 0.076;
-    const h = 0.026;
-    const r = 0.005;
-
-    const shape = this.createRoundedRectShape(w, h, r);
-    const geom = new ShapeGeometry(shape, 6);
-    this.disposableGeometries.push(geom);
-
-    const texture = this.createLabelTexture(360, 110, (ctx, cw, ch) => {
-      // Button background with soft gradient
-      const grad = ctx.createLinearGradient(0, 0, cw, ch);
-      grad.addColorStop(0, 'rgba(196, 181, 253, 0.22)');
-      grad.addColorStop(1, 'rgba(147, 197, 253, 0.18)');
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = 'rgba(196, 181, 253, 0.50)';
-      ctx.lineWidth = 2;
-      this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 16);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = WRIST_UI_PALETTE.hex.warmWhite;
-      ctx.font = '600 28px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('▶  PLAY / PAUSE', cw / 2, ch / 2);
-    });
-
-    const mat = new MeshPhysicalMaterial({
-      map: texture,
-      color: new Color(0xffffff),
-      transparent: true,
-      opacity: 0.95,
-      roughness: 0.3,
-      emissive: new Color(WRIST_UI_PALETTE.softLavender),
-      emissiveIntensity: WRIST_UI_EMISSIVE.buttonNormalIntensity,
-    });
-    this.disposableMaterials.push(mat);
-    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
-
-    const mesh = new Mesh(geom, mat);
-    mesh.name = 'WristUI_PlayPauseButton';
-    mesh.position.set(0, -0.012, zPos);
-    this.panelContainer.add(mesh);
-
-    this.controls.set('playPause', { id: 'playPause', mesh, labelTexture: texture });
-  }
-
-  /**
-   * Control 2: RESTART Button
-   * Position: Bottom (x: 0, y: -0.044), Size: 0.076 x 0.024 m
-   */
-  private createRestartButton(zPos: number): void {
-    const w = 0.076;
-    const h = 0.024;
-    const r = 0.005;
-
-    const shape = this.createRoundedRectShape(w, h, r);
-    const geom = new ShapeGeometry(shape, 6);
-    this.disposableGeometries.push(geom);
-
-    const texture = this.createLabelTexture(360, 100, (ctx, cw, ch) => {
-      ctx.fillStyle = 'rgba(167, 139, 250, 0.16)';
-      ctx.strokeStyle = 'rgba(196, 181, 253, 0.40)';
-      ctx.lineWidth = 2;
-      this.roundRectCanvas(ctx, 4, 4, cw - 8, ch - 8, 16);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = WRIST_UI_PALETTE.hex.warmWhite;
-      ctx.font = '600 26px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('↺  RESTART', cw / 2, ch / 2);
-    });
-
-    const mat = new MeshPhysicalMaterial({
-      map: texture,
-      color: new Color(0xffffff),
-      transparent: true,
-      opacity: 0.95,
-      roughness: 0.3,
-      emissive: new Color(WRIST_UI_PALETTE.subtleViolet),
-      emissiveIntensity: WRIST_UI_EMISSIVE.buttonNormalIntensity,
-    });
-    this.disposableMaterials.push(mat);
-    this.controlMaterials.push({ material: mat, baseOpacity: 0.95 });
-
-    const mesh = new Mesh(geom, mat);
-    mesh.name = 'WristUI_RestartButton';
-    mesh.position.set(0, -0.044, zPos);
-    this.panelContainer.add(mesh);
-
-    this.controls.set('restart', { id: 'restart', mesh, labelTexture: texture });
-  }
-
-  /**
-   * Utility for drawing rounded rectangles in HTML5 Canvas 2D
-   */
-  private roundRectCanvas(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    r: number
-  ): void {
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Border
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = isPlaying ? 'rgba(40, 160, 120, 0.85)' : 'rgba(61, 143, 170, 0.85)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Icon
+    ctx.fillStyle = WRIST_UI_PALETTE.hex.ivoryText;
+    ctx.font = 'bold 42px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(isPlaying ? '⏸' : '▶', cx, cy);
   }
 
-  /**
-   * Release all GPU geometries, materials, and canvas textures
-   */
+  private redrawProgress(canvas: HTMLCanvasElement, pct: number): void {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const cw = canvas.width, ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    const cx = cw / 2, cy = ch / 2;
+    const arcR = cw * 0.43;
+    const arcWidth = cw * 0.04;
+
+    // Track arc (full 270° from -225° to 45°)
+    const startAngle = (225 * Math.PI) / 180;
+    const endAngle   = startAngle - Math.PI * 1.5; // 270° sweep CCW
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, arcR, startAngle, endAngle, true);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = arcWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Fill arc
+    if (pct > 0.01) {
+      const fillAngle = endAngle + (1 - pct) * Math.PI * 1.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, arcR, startAngle, fillAngle, true);
+      const fg = ctx.createLinearGradient(cx - arcR, cy, cx + arcR, cy);
+      fg.addColorStop(0, 'rgba(42, 122, 106, 0.90)');
+      fg.addColorStop(1, 'rgba(61, 143, 170, 0.90)');
+      ctx.strokeStyle = fg;
+      ctx.lineWidth = arcWidth;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+
+    // Percent text
+    const pctStr = `${Math.round(pct * 100)}%`;
+    ctx.fillStyle = 'rgba(245, 240, 232, 0.70)';
+    ctx.font = '600 28px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pctStr, cx, cy + cw * 0.30);
+  }
+
+  private redrawStatus(canvas: HTMLCanvasElement, label: string): void {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(245, 240, 232, 0.60)';
+    ctx.font = '500 16px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, canvas.width / 2, canvas.height / 2);
+  }
+
+  // ─── Disposal ──────────────────────────────────────────────────────────────
+
   dispose(): void {
-    for (const geom of this.disposableGeometries) {
-      geom.dispose();
-    }
+    for (const geom of this.disposableGeometries) geom.dispose();
     this.disposableGeometries.length = 0;
-
-    for (const mat of this.disposableMaterials) {
-      mat.dispose();
-    }
+    for (const mat of this.disposableMaterials) mat.dispose();
     this.disposableMaterials.length = 0;
-
-    for (const tex of this.disposableTextures) {
-      tex.dispose();
-    }
+    for (const tex of this.disposableTextures) tex.dispose();
     this.disposableTextures.length = 0;
-
     this.controlMaterials.length = 0;
     this.controls.clear();
     this.panelContainer.clear();
     this.panelMesh = null;
     this.borderLine = null;
-    this.gradientOverlay = null;
-    this.gradientMaterial = null;
+    this.glowRingMesh = null;
+    this.progressMesh = null;
     this.statusCanvas = null;
     this.statusTexture = null;
     this.progressCanvas = null;
     this.progressTexture = null;
+    this.playPauseCanvas = null;
+    this.playPauseTexture = null;
   }
 }

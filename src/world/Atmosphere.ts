@@ -33,16 +33,16 @@ export class Atmosphere {
   private groundColor = new Color();
 
   constructor() {
-    // Large hemisphere dome for smooth gradient sky
-    const domeGeo = new SphereGeometry(18, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.55);
+    // Large hemisphere dome for smooth gradient sky — radius 35m for the spacious cosmic world
+    const domeGeo = new SphereGeometry(35, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.55);
     this.domeMaterial = new ShaderMaterial({
       side: BackSide,
       depthWrite: false,
       uniforms: {
-        uSkyColor: { value: new Color(0.12, 0.18, 0.32) },
-        uEquatorColor: { value: new Color(0.22, 0.28, 0.44) },
-        uGroundColor: { value: new Color(0.08, 0.10, 0.18) },
-        uIntensity: { value: 1.0 },
+        uSkyColor:    { value: new Color(0.05, 0.09, 0.18) },  // Midnight blue
+        uEquatorColor:{ value: new Color(0.08, 0.14, 0.26) },  // Indigo horizon
+        uGroundColor: { value: new Color(0.03, 0.05, 0.09) },  // Near-black charcoal
+        uIntensity:   { value: 1.0 },
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -61,12 +61,15 @@ export class Atmosphere {
 
         void main() {
           float h = normalize(vWorldPosition).y;
+          // Atmospheric haze: slight brightening near horizon for depth
+          float hazeBlend = clamp(1.0 - abs(h) * 4.0, 0.0, 1.0) * 0.12;
           vec3 col;
           if (h > 0.0) {
-            col = mix(uEquatorColor, uSkyColor, clamp(pow(h, 0.7), 0.0, 1.0));
+            col = mix(uEquatorColor, uSkyColor, clamp(pow(h, 0.6), 0.0, 1.0));
           } else {
-            col = mix(uEquatorColor, uGroundColor, clamp(pow(-h, 0.7), 0.0, 1.0));
+            col = mix(uEquatorColor, uGroundColor, clamp(pow(-h, 0.6), 0.0, 1.0));
           }
+          col = mix(col, uEquatorColor + vec3(0.02, 0.04, 0.06), hazeBlend);
           gl_FragColor = vec4(col * uIntensity, 1.0);
         }
       `,
@@ -75,13 +78,13 @@ export class Atmosphere {
     this.domeMesh.position.set(0, 0, 0);
     this.group.add(this.domeMesh);
 
-    // Subtle horizon glow ring
-    const ringGeo = new RingGeometry(8.0, 16.0, 48);
+    // Horizon glow ring — scaled to match the larger dome
+    const ringGeo = new RingGeometry(14.0, 28.0, 64);
     this.horizonMaterial = new MeshBasicMaterial({
-      color: 0x445588,
+      color: 0x1a3a5a,     // Deep teal-navy
       side: DoubleSide,
       transparent: true,
-      opacity: 0.18,
+      opacity: 0.22,
       blending: AdditiveBlending,
       depthWrite: false,
     });
@@ -90,13 +93,13 @@ export class Atmosphere {
     this.horizonRingMesh.position.set(0, 0.05, 0);
     this.group.add(this.horizonRingMesh);
 
-    // Ground reflective disc for grounded seated presence
-    const groundGeo = new RingGeometry(0.1, 7.5, 36);
+    // Ground reflective disc — wider for the cosmic world
+    const groundGeo = new RingGeometry(0.1, 12.0, 48);
     this.groundMaterial = new MeshBasicMaterial({
-      color: 0x111628,
+      color: 0x060c18,     // Near-black midnight
       side: DoubleSide,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.40,
       depthWrite: false,
     });
     this.groundDiscMesh = new Mesh(groundGeo, this.groundMaterial);

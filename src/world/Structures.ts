@@ -35,20 +35,22 @@ export class Structures {
   private scratchEmissive = new Color();
 
   constructor() {
-    // 1. Arc frames: soft partial toruses curved around user's forward hemisphere
+    // Cosmic celestial framing arcs — scale-matched to the enlarged world
     const arcConfigs = [
-      { radius: 2.2, tube: 0.015, arc: Math.PI * 0.75, pos: [0, 1.2, -1.8], rot: [0.1, 0, 0] },
-      { radius: 3.4, tube: 0.020, arc: Math.PI * 0.9, pos: [0, 1.4, -2.4], rot: [-0.15, 0, 0] },
-      { radius: 4.8, tube: 0.025, arc: Math.PI * 1.1, pos: [0, 1.6, -3.2], rot: [0.2, 0, 0] },
+      { radius: 3.5,  tube: 0.018, arc: Math.PI * 0.70, pos: [0, 1.3, -2.5],  rot: [0.08, 0, 0],  color: 0x2a6878 },  // Inner teal arc
+      { radius: 5.5,  tube: 0.022, arc: Math.PI * 0.85, pos: [0, 1.6, -3.8],  rot: [-0.12, 0, 0], color: 0x1a4a5a },  // Mid arc
+      { radius: 8.5,  tube: 0.028, arc: Math.PI * 1.05, pos: [0, 2.0, -5.5],  rot: [0.15, 0, 0],  color: 0xa88030 },  // Outer gold arc
+      { radius: 12.0, tube: 0.034, arc: Math.PI * 1.25, pos: [0, 2.8, -8.0],  rot: [0.20, 0, 0],  color: 0x123040 },  // Distant silhouette arc
     ];
 
     arcConfigs.forEach((cfg) => {
-      const geo = new TorusGeometry(cfg.radius, cfg.tube, 16, 48, cfg.arc);
+      const geo = new TorusGeometry(cfg.radius, cfg.tube, 16, 64, cfg.arc);
       const mat = new MeshStandardMaterial({
-        color: 0x7788cc,
-        emissive: 0x112244,
-        roughness: 0.2,
-        metalness: 0.2,
+        color: cfg.color,
+        emissive: cfg.color,
+        emissiveIntensity: 0.08,
+        roughness: 0.15,
+        metalness: 0.25,
         transparent: true,
         opacity: 0.0,
         side: DoubleSide,
@@ -64,14 +66,14 @@ export class Structures {
       this.arcMaterials.push(mat);
     });
 
-    // 2. Luminous grab node orb (interactive anchor)
+    // Luminous grab node orb (interactive anchor) — muted teal-gold
     const orbGeo = new SphereGeometry(0.065, 24, 24);
     this.grabOrbMaterial = new MeshStandardMaterial({
-      color: 0xffddaa,
-      emissive: 0xffaa44,
-      emissiveIntensity: 0.6,
-      roughness: 0.15,
-      metalness: 0.1,
+      color: 0x6aaa88,     // Muted teal-green
+      emissive: 0x2a5a40,
+      emissiveIntensity: 0.55,
+      roughness: 0.18,
+      metalness: 0.12,
       transparent: true,
       opacity: 0.0,
       depthWrite: false,
@@ -99,55 +101,56 @@ export class Structures {
   }
 
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
-    const { activeCue, normalizedProgress, interpolatedColor } = frameData;
+    const { normalizedProgress, interpolatedColor } = frameData;
 
-    this.scratchColor.setRGB(...interpolatedColor.warmAccent);
-    this.scratchEmissive.setRGB(
-      interpolatedColor.warmAccent[0] * 0.4,
-      interpolatedColor.warmAccent[1] * 0.4,
-      interpolatedColor.warmAccent[2] * 0.4
-    );
+    // Arcs are the primary framing element — emerge earlier than buildings (from DISCOVERY)
+    // Outer arcs (higher index) emerge later for layered depth effect
+    const arcVisibilities = [
+      // Inner teal arc: emerges at 10%, full by 25%
+      Math.max(0, Math.min(1, (normalizedProgress - 0.10) / 0.15)),
+      // Mid arc: emerges at 20%, full by 38%
+      Math.max(0, Math.min(1, (normalizedProgress - 0.20) / 0.18)),
+      // Outer gold arc: emerges at 32%
+      Math.max(0, Math.min(1, (normalizedProgress - 0.32) / 0.20)),
+      // Distant silhouette: emerges at 50% (BUILD phase)
+      Math.max(0, Math.min(1, (normalizedProgress - 0.50) / 0.22)),
+    ];
+    // All arcs dissolve after 97%
+    const dissolve = normalizedProgress >= 0.97 ? Math.max(0, (1.0 - normalizedProgress) / 0.03) : 1.0;
 
-    // Development (normalizedProgress >= 0.26, t = 10s) through Climax
-    let visibility = 0;
-    if (normalizedProgress >= 0.26 && normalizedProgress < 0.97) {
-      if (normalizedProgress < 0.38) {
-        // Emerging
-        visibility = (normalizedProgress - 0.26) / 0.12;
-      } else {
-        visibility = 1.0;
-      }
-    } else if (normalizedProgress >= 0.97) {
-      // Dissolving in release
-      visibility = Math.max(0, (1.0 - normalizedProgress) / 0.03);
-    }
+    const lowPulse  = 1.0 + metrics.low  * 0.025;
+    const midPulse  = 1.0 + metrics.mid  * 0.015;
 
-    const microPulse = 1.0 + metrics.low * 0.03;
-    const targetScale = visibility * microPulse;
+    // Per-arc cosmically-keyed colors: teal inner, teal mid, gold outer, charcoal distant
+    const arcBaseColors = [0x2a6878, 0x1a4a5a, 0xa88030, 0x123040] as const;
+    const arcOpacities  = [0.45, 0.38, 0.30, 0.20] as const;
 
     this.arcMeshes.forEach((arc, i) => {
-      if (visibility <= 0.001) {
+      const vis = arcVisibilities[i] * dissolve;
+      if (vis <= 0.001) {
         arc.scale.set(0.001, 0.001, 0.001);
         this.arcMaterials[i].opacity = 0;
       } else {
-        arc.scale.set(targetScale, targetScale, targetScale);
-        this.arcMaterials[i].opacity = visibility * (0.4 + i * 0.12);
-        this.arcMaterials[i].color.copy(this.scratchColor);
+        const pulsed = vis * (i < 2 ? lowPulse : midPulse);
+        arc.scale.set(pulsed, pulsed, pulsed);
+        this.arcMaterials[i].opacity = vis * arcOpacities[i];
+        // Let conductor color subtly tint emissive (only 20% blend, rest stays cosmic)
+        this.scratchEmissive.setHex(arcBaseColors[i]);
         this.arcMaterials[i].emissive.copy(this.scratchEmissive);
-        this.arcMaterials[i].emissiveIntensity = 0.3 + metrics.mid * 0.2;
+        this.arcMaterials[i].emissiveIntensity = 0.10 + (i < 3 ? metrics.mid : metrics.low) * 0.12;
       }
-      // Extremely gentle sway (motion budget < 0.05 rad/s)
-      arc.rotation.z += deltaSec * (0.015 * (i % 2 === 0 ? 1 : -1));
+      // Extremely gentle sway (motion budget < 0.04 rad/s)
+      arc.rotation.z += deltaSec * (0.012 * (i % 2 === 0 ? 1 : -1));
     });
 
-    // Grab Orb positioning & state
-    if (visibility > 0.1) {
-      const orbScale = visibility * (1.0 + metrics.mid * 0.05);
+    // Grab Orb: visible from Development phase onward
+    const orbVis = Math.max(0, Math.min(1, (normalizedProgress - 0.26) / 0.12)) * dissolve;
+    if (orbVis > 0.01) {
+      const orbScale = orbVis * (1.0 + metrics.mid * 0.04);
       this.grabOrbMesh.scale.set(orbScale, orbScale, orbScale);
       this.grabOrbMesh.position.copy(this.grabBasePosition).add(this.grabUserOffset);
-      this.grabOrbMaterial.opacity = visibility * 0.9;
-      this.grabOrbMaterial.color.copy(this.scratchColor);
-      this.grabOrbMaterial.emissive.copy(this.scratchEmissive);
+      this.grabOrbMaterial.opacity = orbVis * 0.88;
+      this.grabOrbMaterial.emissiveIntensity = 0.55 + metrics.high * 0.25;
     } else {
       this.grabOrbMesh.scale.set(0.001, 0.001, 0.001);
       this.grabOrbMaterial.opacity = 0;

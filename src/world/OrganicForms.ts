@@ -65,10 +65,10 @@ export class OrganicForms {
     const primaryGeo = new TubeGeometry(primaryCurve, 64, 0.035, 16, true);
 
     this.primaryMaterial = new MeshStandardMaterial({
-      color: 0x99aaff,
-      emissive: 0x334488,
-      roughness: 0.25,
-      metalness: 0.1,
+      color: 0x3a8898,    // Muted teal
+      emissive: 0x0f3040,
+      roughness: 0.22,
+      metalness: 0.12,
       transparent: true,
       opacity: 0.0,
       side: DoubleSide,
@@ -81,7 +81,7 @@ export class OrganicForms {
     this.primaryRibbon.scale.set(0.001, 0.001, 0.001);
     this.group.add(this.primaryRibbon);
 
-    // 2. Secondary Harmonic Ribbons (2 surrounding spirals)
+    // 2. Secondary Harmonic Ribbons (2 surrounding spirals) — deeper charcoal-teal
     const secondaryConfigs = [
       {
         pts: [
@@ -107,9 +107,9 @@ export class OrganicForms {
       const curve = new CatmullRomCurve3(cfg.pts, false);
       const geo = new TubeGeometry(curve, 48, cfg.radius, 12, false);
       const mat = new MeshStandardMaterial({
-        color: 0x8899dd,
-        emissive: 0x223366,
-        roughness: 0.3,
+        color: 0x1a5060,   // Deep charcoal-teal
+        emissive: 0x081828,
+        roughness: 0.28,
         metalness: 0.15,
         transparent: true,
         opacity: 0.0,
@@ -172,12 +172,18 @@ export class OrganicForms {
         break;
     }
 
-    // Colors
-    this.scratchColor.setRGB(...interpolatedColor.primaryAccent);
+    // Colors — tint toward teal primary, keep restrained
+    // We blend the conductor's primaryAccent toward our cosmic teal base (60/40)
+    const cosmicTealR = 0.23, cosmicTealG = 0.53, cosmicTealB = 0.60;
+    this.scratchColor.setRGB(
+      interpolatedColor.primaryAccent[0] * 0.40 + cosmicTealR * 0.60,
+      interpolatedColor.primaryAccent[1] * 0.40 + cosmicTealG * 0.60,
+      interpolatedColor.primaryAccent[2] * 0.40 + cosmicTealB * 0.60,
+    );
     this.scratchEmissive.setRGB(
-      interpolatedColor.primaryAccent[0] * 0.5,
-      interpolatedColor.primaryAccent[1] * 0.5,
-      interpolatedColor.primaryAccent[2] * 0.5
+      this.scratchColor.r * 0.30,
+      this.scratchColor.g * 0.30,
+      this.scratchColor.b * 0.30,
     );
 
     // Level C: subtle micro-breathing (2-4% scale oscillation with audio)

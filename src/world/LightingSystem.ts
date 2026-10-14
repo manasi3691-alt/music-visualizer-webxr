@@ -21,18 +21,18 @@ export class LightingSystem {
   private warmColor = new Color();
 
   constructor() {
-    // Soft diffuse ambient light
-    this.ambientLight = new AmbientLight(0x222a44, 0.6);
+    // Soft diffuse ambient — deep midnight blue-teal
+    this.ambientLight = new AmbientLight(0x0e1c2e, 0.55);
     this.group.add(this.ambientLight);
 
-    // Primary directional light representing celestial/horizon glow
-    this.primaryLight = new DirectionalLight(0xa0b0e0, 0.8);
-    this.primaryLight.position.set(0, 5, -3);
+    // Primary directional: cool blue-white from above-front, representing starlight
+    this.primaryLight = new DirectionalLight(0x8ab8cc, 0.65);
+    this.primaryLight.position.set(0, 6, -4);
     this.group.add(this.primaryLight);
 
-    // Warm accent light providing soft rim highlights
-    this.warmAccentLight = new DirectionalLight(0xffe2b8, 0.4);
-    this.warmAccentLight.position.set(3, 2, 2);
+    // Warm accent: restrained gold from the side, replaces the harsh warm-white rim
+    this.warmAccentLight = new DirectionalLight(0xc8a84a, 0.28);
+    this.warmAccentLight.position.set(4, 2, 3);
     this.group.add(this.warmAccentLight);
   }
 
@@ -58,17 +58,20 @@ export class LightingSystem {
       interpolatedColor.warmAccent[2]
     );
 
-    // Level C micro FFT subtle modulation (2-4% intensity change)
-    const microPulse = 1.0 + (metrics.mid * 0.04 + metrics.high * 0.03);
+    // Level C micro FFT subtle modulation (2-3% intensity change — restrained)
+    const microPulse = 1.0 + (metrics.mid * 0.025 + metrics.high * 0.015);
 
     this.ambientLight.color.copy(this.ambientColor);
-    this.ambientLight.intensity = (0.5 + interpolatedColor.intensity * 0.3) * microPulse;
+    // Cap ambient: max intensity 0.70 to avoid bright grey-wash at climax
+    this.ambientLight.intensity = Math.min(0.70, (0.45 + interpolatedColor.intensity * 0.18) * microPulse);
 
     this.primaryLight.color.copy(this.primaryColor);
-    this.primaryLight.intensity = (0.7 + interpolatedColor.intensity * 0.4) * microPulse;
+    // Cap primary: max 0.85, keep cool starlight quality
+    this.primaryLight.intensity = Math.min(0.85, (0.55 + interpolatedColor.intensity * 0.22) * microPulse);
 
+    // Warm gold accent driven by low-frequency energy — gentle breathing warmth
     this.warmAccentLight.color.copy(this.warmColor);
-    this.warmAccentLight.intensity = (0.3 + interpolatedColor.intensity * 0.3) * (1.0 + metrics.low * 0.05);
+    this.warmAccentLight.intensity = Math.min(0.45, (0.20 + interpolatedColor.intensity * 0.14) * (1.0 + metrics.low * 0.06));
   }
 
   dispose(): void {
