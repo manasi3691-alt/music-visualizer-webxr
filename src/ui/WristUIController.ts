@@ -387,10 +387,16 @@ export class WristUIController {
       const world = this.deps.world;
       const leftGrip = world.player.gripSpaces.left;
       const rightGrip = world.player.gripSpaces.right;
+      const pokingSpace = (world.player.indexTipSpaces?.right && world.player.indexTipSpaces.right.visible)
+        ? world.player.indexTipSpaces.right
+        : rightGrip;
 
-      if (leftGrip.matrixWorld.elements[15] > 0 && rightGrip.matrixWorld.elements[15] > 0) {
+      const hasLeft = leftGrip.visible || leftGrip.matrixWorld.elements[15] > 0;
+      const hasRight = pokingSpace.visible || pokingSpace.matrixWorld.elements[15] > 0;
+
+      if (hasLeft && hasRight) {
         this.scratchWristWorldPos.setFromMatrixPosition(this.pokeAnchorMesh.matrixWorld);
-        this.scratchPokingWorldPos.setFromMatrixPosition(rightGrip.matrixWorld);
+        this.scratchPokingWorldPos.setFromMatrixPosition(pokingSpace.matrixWorld);
 
         const dist = this.scratchPokingWorldPos.distanceTo(this.scratchWristWorldPos);
         const isInside = dist <= this.pokeAnchorRadius;

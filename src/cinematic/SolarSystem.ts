@@ -79,9 +79,9 @@ export class SolarSystem {
 
   // Sun and Planets
   private sunGroup: Group = new Group();
-  private sunMesh: Mesh;
-  private sunGlowMesh: Mesh;
-  private sunLightMesh: Mesh;
+  private sunMesh!: Mesh; // assigned synchronously in buildSun() from constructor
+  private sunGlowMesh!: Mesh; // assigned synchronously in buildSun() from constructor
+  private sunLightMesh!: Mesh; // assigned synchronously in buildSun() from constructor
   private readonly sunRadius = 0.32;
 
   private planetRegistry: Map<string, PlanetBody> = new Map();

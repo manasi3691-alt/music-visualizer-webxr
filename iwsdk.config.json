@@ -20,7 +20,7 @@
       "canvasPointerEvents": true
     },
     "render": {
-      "near": 0.001,
+      "near": 0.1,
       "far": 200,
       "camera": {
         "position": [
@@ -48,7 +48,9 @@
   },
   "dev": {
     "emulator": {
-      "device": "metaQuest3"
+      "device": "metaQuest3",
+      "activation": "localhost",
+      "injectOnBuild": false
     }
   }
 }

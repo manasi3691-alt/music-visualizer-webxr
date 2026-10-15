@@ -101,8 +101,8 @@ export class CityXRInput {
     const leftRay = this.world.player.raySpaces.left;
     const rightRay = this.world.player.raySpaces.right;
 
-    const hasLeft = leftGrip.matrixWorld.elements[15] > 0;
-    const hasRight = rightGrip.matrixWorld.elements[15] > 0;
+    const hasLeft = leftGrip.visible || (this.xrSession?.inputSources ? Array.from(this.xrSession.inputSources).some(s => s.handedness === 'left') : false);
+    const hasRight = rightGrip.visible || (this.xrSession?.inputSources ? Array.from(this.xrSession.inputSources).some(s => s.handedness === 'right') : false);
 
     interactionDebugState.set({
       leftControllerDetected: hasLeft,

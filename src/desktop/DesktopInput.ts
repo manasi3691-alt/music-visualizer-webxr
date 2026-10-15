@@ -4,10 +4,11 @@
  * drag-to-grab, and scroll-to-scale.
  */
 
-import { Vector3, Raycaster, Camera, Object3D } from '@iwsdk/core';
+import { Vector2, Vector3, Raycaster, Camera, Object3D } from '@iwsdk/core';
 import { interactionRegistry } from '../interaction/InteractionRegistry.js';
 import { ScaleElement } from '../interaction/ScaleElement.js';
 import { experienceWorld } from '../app/ExperienceApp.js';
+import { experienceState } from '../app/ExperienceState.js';
 
 
 export class DesktopInput {
@@ -31,7 +32,7 @@ export class DesktopInput {
   private readonly minYaw = -Math.PI * 0.65;
 
   private raycaster = new Raycaster();
-  private mouseVec = { x: 0, y: 0 };
+  private mouseVec = new Vector2();
   private scaleElement = new ScaleElement();
 
   private boundOnMouseDown: (e: MouseEvent) => void;
@@ -136,6 +137,8 @@ export class DesktopInput {
     const deltaY = e.clientY - this.lastMouseY;
     this.lastMouseX = e.clientX;
     this.lastMouseY = e.clientY;
+
+    if (experienceState.xrState === 'ACTIVE') return;
 
     if (this.isDraggingPlanet && experienceWorld?.solarSystem) {
       this.planetDragCumulative.x += deltaX * 0.003;

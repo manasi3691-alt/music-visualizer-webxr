@@ -49,10 +49,11 @@ export class Atmosphere {
         void main() {
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
           vWorldPosition = worldPos.xyz;
-          gl_Position = projectionMatrix * viewMatrix * worldPos;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
+        precision highp float;
         uniform vec3 uSkyColor;
         uniform vec3 uEquatorColor;
         uniform vec3 uGroundColor;
@@ -75,6 +76,7 @@ export class Atmosphere {
       `,
     });
     this.domeMesh = new Mesh(domeGeo, this.domeMaterial);
+    this.domeMesh.renderOrder = -100;
     this.domeMesh.position.set(0, 0, 0);
     this.group.add(this.domeMesh);
 
