@@ -39,8 +39,8 @@ export class ExperienceApp {
     // 1. Instantiate procedural visual world
     experienceWorld = new ExperienceWorld(isQuest);
 
-    // Attach to IWSDK root transform entity
-    const rootEntity = world.createTransformEntity();
+    // Attach to IWSDK root transform entity (marked persistent to stay on scene root)
+    const rootEntity = world.createTransformEntity(undefined, { persistent: true });
     if (rootEntity.object3D) {
       rootEntity.object3D.add(experienceWorld.rootGroup);
     }
@@ -50,10 +50,26 @@ export class ExperienceApp {
     cityXRInput.init(world, experienceWorld.citySystem.interaction);
 
     experienceState.subscribeXR((xrState) => {
-      if (xrState === 'ACTIVE' && world.session) {
-        cityXRInput.onXRActive(world.session);
+      if (xrState === 'ACTIVE') {
+        if (this.uiContainer) {
+          this.uiContainer.style.opacity = '0';
+          this.uiContainer.style.pointerEvents = 'none';
+        }
+        if (world.session) {
+          cityXRInput.onXRActive(world.session);
+        }
+        // If audio is ready, start playback automatically on entering XR
+        if (experienceState.phase === 'READY' || experienceState.phase === 'PAUSED') {
+          audioEngine.play().catch((err) => {
+            console.warn('[ExperienceApp] Play on XR active:', err);
+          });
+        }
       } else if (xrState === 'ENDED' || xrState === 'NONE') {
         cityXRInput.onXREnded();
+        if (this.uiContainer && experienceState.phase !== 'PLAYING') {
+          this.uiContainer.style.opacity = '1';
+          this.uiContainer.style.pointerEvents = 'auto';
+        }
       }
     });
 
@@ -288,7 +304,17 @@ export class ExperienceApp {
     playBtn?.addEventListener('click', () => this.start());
 
     const xrBtn = document.getElementById('btn-xr');
-    xrBtn?.addEventListener('click', () => xrSetup.launchXR());
+    xrBtn?.addEventListener('click', async () => {
+      // Start audio playback within the user click gesture before launching XR
+      if (experienceState.phase === 'READY' || experienceState.phase === 'PAUSED') {
+        try {
+          await this.start();
+        } catch (e) {
+          console.warn('[ExperienceApp] Audio play before XR:', e);
+        }
+      }
+      await xrSetup.launchXR();
+    });
   }
 
   private renderReplayUI(): void {

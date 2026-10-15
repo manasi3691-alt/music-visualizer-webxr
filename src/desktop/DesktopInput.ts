@@ -8,6 +8,7 @@ import { Vector2, Vector3, Raycaster, Camera, Object3D } from '@iwsdk/core';
 import { interactionRegistry } from '../interaction/InteractionRegistry.js';
 import { ScaleElement } from '../interaction/ScaleElement.js';
 import { experienceWorld } from '../app/ExperienceApp.js';
+import { experienceState } from '../app/ExperienceState.js';
 
 
 export class DesktopInput {
@@ -136,6 +137,8 @@ export class DesktopInput {
     const deltaY = e.clientY - this.lastMouseY;
     this.lastMouseX = e.clientX;
     this.lastMouseY = e.clientY;
+
+    if (experienceState.xrState === 'ACTIVE') return;
 
     if (this.isDraggingPlanet && experienceWorld?.solarSystem) {
       this.planetDragCumulative.x += deltaX * 0.003;
