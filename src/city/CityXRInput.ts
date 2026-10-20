@@ -52,6 +52,14 @@ export class CityXRInput {
     this.isXRActive = true;
     this.xrSession = session;
 
+    // Remove any previous stale listeners
+    if (this.boundOnSelectStart) {
+      session.removeEventListener('selectstart', this.boundOnSelectStart);
+      session.removeEventListener('selectend', this.boundOnSelectEnd!);
+      session.removeEventListener('squeezestart', this.boundOnSqueezeStart!);
+      session.removeEventListener('squeezeend', this.boundOnSqueezeEnd!);
+    }
+
     this.boundOnSelectStart = (e) => this.handleXRInputStart(e as XRInputSourceEvent, 'select');
     this.boundOnSelectEnd = (e) => this.handleXRInputEnd(e as XRInputSourceEvent, 'select');
     this.boundOnSqueezeStart = (e) => this.handleXRInputStart(e as XRInputSourceEvent, 'squeeze');
@@ -96,13 +104,33 @@ export class CityXRInput {
   update(deltaSec: number): void {
     if (!this.isXRActive || !this.world || !this.interaction) return;
 
+    // Check if session became available asynchronously
+    if (!this.xrSession) {
+      const activeSession = (this.world.renderer as any)?.xr?.getSession() || this.world.session;
+      if (activeSession) {
+        this.onXRActive(activeSession);
+      }
+    }
+
     const leftGrip = this.world.player.gripSpaces.left;
     const rightGrip = this.world.player.gripSpaces.right;
     const leftRay = this.world.player.raySpaces.left;
     const rightRay = this.world.player.raySpaces.right;
 
-    const hasLeft = leftGrip.visible || (this.xrSession?.inputSources ? Array.from(this.xrSession.inputSources).some(s => s.handedness === 'left') : false);
-    const hasRight = rightGrip.visible || (this.xrSession?.inputSources ? Array.from(this.xrSession.inputSources).some(s => s.handedness === 'right') : false);
+    // Force matrix update to ensure fresh world coordinates (HEAD: required on Quest
+    // where IWSDK may not update grip spaces every frame before the app reads them)
+    leftGrip.updateMatrixWorld();
+    rightGrip.updateMatrixWorld();
+    leftRay.updateMatrixWorld();
+    rightRay.updateMatrixWorld();
+
+    // Controller presence: visible flag + matrix position guard (HEAD) with XRSession
+    // inputSources as additional fallback when grip space is tracked but not yet visible (incoming)
+    const inputSources = this.xrSession?.inputSources ? Array.from(this.xrSession.inputSources) : [];
+    const hasLeft = (leftGrip.visible !== false && (leftGrip.matrixWorld.elements[15] > 0 || leftGrip.position.lengthSq() > 0.0001))
+      || inputSources.some(s => s.handedness === 'left');
+    const hasRight = (rightGrip.visible !== false && (rightGrip.matrixWorld.elements[15] > 0 || rightGrip.position.lengthSq() > 0.0001))
+      || inputSources.some(s => s.handedness === 'right');
 
     interactionDebugState.set({
       leftControllerDetected: hasLeft,
@@ -158,11 +186,11 @@ export class CityXRInput {
     const availableBlocks = this.interaction.getAvailableBlocks();
     if (availableBlocks.length === 0) return null;
 
-    // A. Proximity check first: is controller within 0.38m of block?
+    // A. Proximity check first: is controller within 0.45m of block?
     this.controllerWorldPos.setFromMatrixPosition(gripSpace.matrixWorld);
     for (const block of availableBlocks) {
       const dist = this.controllerWorldPos.distanceTo(block.group.position);
-      if (dist <= 0.38) {
+      if (dist <= 0.45) {
         return block;
       }
     }
@@ -172,7 +200,7 @@ export class CityXRInput {
     this.rayDirection.set(0, 0, -1).transformDirection(raySpace.matrixWorld).normalize();
     this.raycaster.ray.origin.copy(this.rayOrigin);
     this.raycaster.ray.direction.copy(this.rayDirection);
-    this.raycaster.far = 2.5; // Within comfortable seated interaction range
+    this.raycaster.far = 4.0; // Comfortable seated reach
 
     const meshes = availableBlocks.map((b) => b.baseMesh);
     const hits = this.raycaster.intersectObjects(meshes, false);
@@ -192,11 +220,15 @@ export class CityXRInput {
     const grip = handedness === 'left' ? this.world.player.gripSpaces.left : this.world.player.gripSpaces.right;
     const ray = handedness === 'left' ? this.world.player.raySpaces.left : this.world.player.raySpaces.right;
 
+    grip.updateMatrixWorld();
+    ray.updateMatrixWorld();
+
     // Check SolarSystem planet interaction first if SolarSystem is active
     if (experienceWorld?.solarSystem?.group.visible) {
       this.rayOrigin.setFromMatrixPosition(ray.matrixWorld);
       this.rayDirection.set(0, 0, -1).transformDirection(ray.matrixWorld).normalize();
-      const hitPlanet = experienceWorld.solarSystem.hitTest(this.rayOrigin, this.rayDirection, 5.0);
+      // Test up to 6.5 meters with generous sphere tolerance
+      const hitPlanet = experienceWorld.solarSystem.hitTest(this.rayOrigin, this.rayDirection, 6.5);
       if (hitPlanet) {
         this.controllerWorldPos.setFromMatrixPosition(grip.matrixWorld);
         const grabbed = experienceWorld.solarSystem.handleGrabStart(handedness, hitPlanet, this.controllerWorldPos);

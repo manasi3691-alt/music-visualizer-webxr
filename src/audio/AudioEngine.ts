@@ -32,6 +32,10 @@ export class AudioEngine {
     return this.audioElement.currentTime;
   }
 
+  get context(): AudioContext | null {
+    return this.audioContext;
+  }
+
   /** Seek forward or backward within the authored excerpt bounds */
   seekRelative(deltaSec: number): void {
     if (!this.audioElement) return;

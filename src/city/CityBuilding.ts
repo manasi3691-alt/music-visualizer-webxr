@@ -346,7 +346,9 @@ export class CityBuilding {
       emissiveIntensity: 0.35,
       roughness: 0.22,
       metalness: 0.15,
-      transmission: 0.35,
+      // transmission removed: WebXR (isPresenting=true) disables the refraction
+      // render pass that physical transmission requires, causing all district
+      // buildings to render invisible (black) in the headset in the early city phase.
       transparent: true,
       opacity,
       depthWrite: true,

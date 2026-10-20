@@ -117,7 +117,15 @@ export class WristUIController {
 
   // ─── XR mounting ───────────────────────────────────────────────────────────
 
-  private onXRActive(): void {
+  onSessionStart(session: XRSession): void {
+    this.onXRActive(session);
+  }
+
+  onSessionEnd(): void {
+    this.onXREnded();
+  }
+
+  private onXRActive(explicitSession?: XRSession): void {
     this.isXRActive = true;
     const world = this.deps?.world;
     if (world) {
@@ -131,6 +139,7 @@ export class WristUIController {
       this.rootGroup.rotation.set(-Math.PI * 0.5, 0, 0);
 
       if (!this.pokeAnchorMesh) {
+        // Generous 12cm radius activation zone for effortless finger/controller poke
         const sphereGeo = new SphereGeometry(this.pokeAnchorRadius, 16, 16);
         const sphereMat = new MeshBasicMaterial({
           color: WRIST_UI_PALETTE.borderEmissive,
@@ -150,7 +159,7 @@ export class WristUIController {
 
     interactionDebugState.set({ wristActivationZoneExists: true });
 
-    const session = this.deps?.world?.session;
+    const session = explicitSession || this.deps?.world?.session || (this.deps?.world?.renderer as any)?.xr?.getSession();
     if (session && !this.boundOnXRSelect) {
       this.boundOnXRSelect = (e: Event) => this.handleXRSelect(e as XRInputSourceEvent);
       session.addEventListener('selectstart', this.boundOnXRSelect);
@@ -237,14 +246,16 @@ export class WristUIController {
 
   private handleXRSelect(e: XRInputSourceEvent): void {
     if (!this.wristUI?.isOpen) return;
-    if (e.inputSource.handedness !== 'right') return;
 
     const world = this.deps?.world;
     if (!world) return;
 
-    const rightRay = world.player.raySpaces.right;
-    this.raycaster.ray.origin.setFromMatrixPosition(rightRay.matrixWorld);
-    this.raycaster.ray.direction.set(0, 0, -1).transformDirection(rightRay.matrixWorld).normalize();
+    const handedness = (e.inputSource.handedness as 'left' | 'right') || 'right';
+    const raySpace = handedness === 'left' ? world.player.raySpaces.left : world.player.raySpaces.right;
+
+    raySpace.updateMatrixWorld();
+    this.raycaster.ray.origin.setFromMatrixPosition(raySpace.matrixWorld);
+    this.raycaster.ray.direction.set(0, 0, -1).transformDirection(raySpace.matrixWorld).normalize();
 
     const hitMeshes = this.wristUI.getHitTestMeshes();
     const objects = hitMeshes.map((h) => h.mesh);
@@ -387,39 +398,65 @@ export class WristUIController {
       const world = this.deps.world;
       const leftGrip = world.player.gripSpaces.left;
       const rightGrip = world.player.gripSpaces.right;
-      const pokingSpace = (world.player.indexTipSpaces?.right && world.player.indexTipSpaces.right.visible)
-        ? world.player.indexTipSpaces.right
-        : rightGrip;
+      const rightIndexTip = (world.player as any)?.indexTipSpaces?.right;
+      const rightRay = world.player.raySpaces.right;
 
+      // Ensure matrices are up to date
+      leftGrip.updateMatrixWorld();
+      this.pokeAnchorMesh.updateMatrixWorld();
+
+      // Gate on both hands being present (incoming: avoids false triggers when only one hand tracked)
       const hasLeft = leftGrip.visible || leftGrip.matrixWorld.elements[15] > 0;
-      const hasRight = pokingSpace.visible || pokingSpace.matrixWorld.elements[15] > 0;
+      const hasRight = (rightIndexTip?.visible || rightIndexTip?.matrixWorld?.elements[15] > 0)
+        || rightGrip.visible || rightGrip.matrixWorld.elements[15] > 0;
+      if (!hasLeft || !hasRight) return;
 
-      if (hasLeft && hasRight) {
-        this.scratchWristWorldPos.setFromMatrixPosition(this.pokeAnchorMesh.matrixWorld);
-        this.scratchPokingWorldPos.setFromMatrixPosition(pokingSpace.matrixWorld);
+      this.scratchWristWorldPos.setFromMatrixPosition(this.pokeAnchorMesh.matrixWorld);
 
-        const dist = this.scratchPokingWorldPos.distanceTo(this.scratchWristWorldPos);
-        const isInside = dist <= this.pokeAnchorRadius;
+      // Check distance from right index tip (hand tracking) or right grip/ray (controller).
+      // Take the minimum across all available probe points (HEAD: maximises detection reliability).
+      let minDist = Infinity;
+      if (rightIndexTip) {
+        rightIndexTip.updateMatrixWorld();
+        this.scratchPokingWorldPos.setFromMatrixPosition(rightIndexTip.matrixWorld);
+        const d = this.scratchPokingWorldPos.distanceTo(this.scratchWristWorldPos);
+        if (d < minDist) minDist = d;
+      }
+      if (rightGrip) {
+        rightGrip.updateMatrixWorld();
+        this.scratchPokingWorldPos.setFromMatrixPosition(rightGrip.matrixWorld);
+        const d = this.scratchPokingWorldPos.distanceTo(this.scratchWristWorldPos);
+        if (d < minDist) minDist = d;
+      }
+      if (rightRay) {
+        rightRay.updateMatrixWorld();
+        this.scratchPokingWorldPos.setFromMatrixPosition(rightRay.matrixWorld);
+        const d = this.scratchPokingWorldPos.distanceTo(this.scratchWristWorldPos);
+        if (d < minDist) minDist = d;
+      }
 
-        if (isInside) {
-          if (!this.wasInsidePokeZone && this.pokeCooldownRemaining <= 0) {
-            this.wasInsidePokeZone = true;
-            this.pokeCooldownRemaining = 0.40;
-            this.wristUI.toggle();
+      // Detection radius: 8.5 cm for natural easy wrist poke
+      const effectiveRadius = 0.085;
+      const isInside = minDist <= effectiveRadius;
 
-            const isOpenNow = this.wristUI.isOpen;
-            interactionDebugState.set({ lastWristPokeDetected: true, wristMenuOpen: isOpenNow });
-            interactionDebugState.logEvent(isOpenNow ? 'poke-open' : 'poke-close', 'right-controller');
+      if (isInside) {
+        if (!this.wasInsidePokeZone && this.pokeCooldownRemaining <= 0) {
+          this.wasInsidePokeZone = true;
+          this.pokeCooldownRemaining = 0.40;
+          this.wristUI.toggle();
 
-            if (this.pokeAnchorMesh.material && 'opacity' in this.pokeAnchorMesh.material) {
-              (this.pokeAnchorMesh.material as any).opacity = 0.85;
-            }
-          }
-        } else {
-          this.wasInsidePokeZone = false;
+          const isOpenNow = this.wristUI.isOpen;
+          interactionDebugState.set({ lastWristPokeDetected: true, wristMenuOpen: isOpenNow });
+          interactionDebugState.logEvent(isOpenNow ? 'poke-open' : 'poke-close', 'right-controller');
+
           if (this.pokeAnchorMesh.material && 'opacity' in this.pokeAnchorMesh.material) {
-            (this.pokeAnchorMesh.material as any).opacity = 0.25;
+            (this.pokeAnchorMesh.material as any).opacity = 0.85;
           }
+        }
+      } else {
+        this.wasInsidePokeZone = false;
+        if (this.pokeAnchorMesh.material && 'opacity' in this.pokeAnchorMesh.material) {
+          (this.pokeAnchorMesh.material as any).opacity = 0.25;
         }
       }
     }

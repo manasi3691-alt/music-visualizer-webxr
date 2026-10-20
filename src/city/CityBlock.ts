@@ -81,7 +81,9 @@ export class CityBlock {
       emissiveIntensity: 0.5,
       roughness: 0.15,
       metalness: 0.1,
-      transmission: 0.45,
+      // transmission removed: WebXR (isPresenting=true) disables the refraction
+      // render pass that physical transmission requires, causing meshes to render
+      // invisible in the headset. Opacity-based translucency works in both modes.
       transparent: true,
       opacity: options.opacity ?? 0.75,
       depthWrite: true,

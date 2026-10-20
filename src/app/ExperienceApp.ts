@@ -49,23 +49,40 @@ export class ExperienceApp {
     xrSetup.init(world);
     cityXRInput.init(world, experienceWorld.citySystem.interaction);
 
+    // Listen to WebXR session lifecycle events directly from WebXRManager.
+    // This is the primary path for cityXRInput and wristUIController session wiring.
+    const webXRManager = (world.renderer as any)?.xr;
+    if (webXRManager && typeof webXRManager.addEventListener === 'function') {
+      webXRManager.addEventListener('sessionstart', () => {
+        const session = webXRManager.getSession();
+        if (session) {
+          cityXRInput.onXRActive(session);
+          wristUIController.onSessionStart(session);
+        }
+      });
+      webXRManager.addEventListener('sessionend', () => {
+        cityXRInput.onXREnded();
+        wristUIController.onSessionEnd();
+      });
+    }
+
+    // Secondary XR state subscriber: handles UI visibility and auto-audio-start.
+    // Does NOT call cityXRInput/wristUIController (already done via webXRManager above).
     experienceState.subscribeXR((xrState) => {
       if (xrState === 'ACTIVE') {
+        // Hide desktop overlay when XR session is live
         if (this.uiContainer) {
           this.uiContainer.style.opacity = '0';
           this.uiContainer.style.pointerEvents = 'none';
         }
-        if (world.session) {
-          cityXRInput.onXRActive(world.session);
-        }
-        // If audio is ready, start playback automatically on entering XR
+        // Auto-start audio if the user enters XR before pressing Play
         if (experienceState.phase === 'READY' || experienceState.phase === 'PAUSED') {
           audioEngine.play().catch((err) => {
             console.warn('[ExperienceApp] Play on XR active:', err);
           });
         }
       } else if (xrState === 'ENDED' || xrState === 'NONE') {
-        cityXRInput.onXREnded();
+        // Restore desktop overlay only if not actively playing (phase drives it otherwise)
         if (this.uiContainer && experienceState.phase !== 'PLAYING') {
           this.uiContainer.style.opacity = '1';
           this.uiContainer.style.pointerEvents = 'auto';
@@ -305,13 +322,18 @@ export class ExperienceApp {
 
     const xrBtn = document.getElementById('btn-xr');
     xrBtn?.addEventListener('click', async () => {
-      // Start audio playback within the user click gesture before launching XR
-      if (experienceState.phase === 'READY' || experienceState.phase === 'PAUSED') {
-        try {
-          await this.start();
-        } catch (e) {
-          console.warn('[ExperienceApp] Audio play before XR:', e);
+      // User gesture requirement: trigger AudioContext resume and start playback before requesting XR session.
+      // Handles all states: not playing, already playing but context suspended, or audio already running.
+      try {
+        if (!audioEngine.isPlaying) {
+          console.log('[ExperienceApp] Starting audio on Enter WebXR user gesture...');
+          await audioEngine.play();
+        } else if (audioEngine.context && audioEngine.context.state === 'suspended') {
+          console.log('[ExperienceApp] Resuming suspended AudioContext on Enter WebXR user gesture...');
+          await audioEngine.context.resume();
         }
+      } catch (audioErr) {
+        console.warn('[ExperienceApp] Audio start on Enter WebXR encountered:', audioErr);
       }
       await xrSetup.launchXR();
     });

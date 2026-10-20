@@ -245,8 +245,8 @@ export class WristUI {
       opacity: WRIST_UI_OPACITY.open,
       roughness: 0.08,
       metalness: 0.20,
-      transmission: 0.35,
-      ior: 1.4,
+      // transmission/ior removed: WebXR disables the refraction pass required
+      // by physical transmission, causing the panel to render invisible in XR.
       reflectivity: 0.5,
     });
     this.disposableMaterials.push(this.panelMaterial);
