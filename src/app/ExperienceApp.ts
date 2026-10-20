@@ -49,11 +49,32 @@ export class ExperienceApp {
     xrSetup.init(world);
     cityXRInput.init(world, experienceWorld.citySystem.interaction);
 
+    // Listen to WebXR session lifecycle events directly from WebXRManager
+    const webXRManager = (world.renderer as any)?.xr;
+    if (webXRManager && typeof webXRManager.addEventListener === 'function') {
+      webXRManager.addEventListener('sessionstart', () => {
+        const session = webXRManager.getSession();
+        if (session) {
+          cityXRInput.onXRActive(session);
+          wristUIController.onSessionStart(session);
+        }
+      });
+      webXRManager.addEventListener('sessionend', () => {
+        cityXRInput.onXREnded();
+        wristUIController.onSessionEnd();
+      });
+    }
+
     experienceState.subscribeXR((xrState) => {
-      if (xrState === 'ACTIVE' && world.session) {
-        cityXRInput.onXRActive(world.session);
+      if (xrState === 'ACTIVE') {
+        const session = (world.renderer as any)?.xr?.getSession() || world.session;
+        if (session) {
+          cityXRInput.onXRActive(session);
+          wristUIController.onSessionStart(session);
+        }
       } else if (xrState === 'ENDED' || xrState === 'NONE') {
         cityXRInput.onXREnded();
+        wristUIController.onSessionEnd();
       }
     });
 
@@ -288,7 +309,21 @@ export class ExperienceApp {
     playBtn?.addEventListener('click', () => this.start());
 
     const xrBtn = document.getElementById('btn-xr');
-    xrBtn?.addEventListener('click', () => xrSetup.launchXR());
+    xrBtn?.addEventListener('click', async () => {
+      // User gesture requirement: trigger AudioContext resume and start playback before requesting XR session
+      try {
+        if (!audioEngine.isPlaying) {
+          console.log('[ExperienceApp] Starting audio on Enter WebXR user gesture...');
+          await audioEngine.play();
+        } else if (audioEngine.context && audioEngine.context.state === 'suspended') {
+          console.log('[ExperienceApp] Resuming suspended AudioContext on Enter WebXR user gesture...');
+          await audioEngine.context.resume();
+        }
+      } catch (audioErr) {
+        console.warn('[ExperienceApp] Audio start on Enter WebXR encountered:', audioErr);
+      }
+      await xrSetup.launchXR();
+    });
   }
 
   private renderReplayUI(): void {

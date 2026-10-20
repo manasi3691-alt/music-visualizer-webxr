@@ -159,7 +159,7 @@ export class CityDistrict {
       this.buildings.push(bld);
     });
 
-    this.group.visible = false;
+    this.group.visible = true;
   }
 
   activate(staggerIndex = 0): void {
@@ -209,7 +209,7 @@ export class CityDistrict {
   reset(): void {
     this.isActivated = false;
     this.activationProgress = 0;
-    this.group.visible = false;
+    this.group.visible = true;
     for (let i = 0; i < this.connectionMaterials.length; i++) {
       this.connectionMaterials[i].opacity = 0;
     }
