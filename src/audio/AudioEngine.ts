@@ -64,6 +64,7 @@ export class AudioEngine {
     return new Promise((resolve, reject) => {
       const audio = new Audio();
       this.audioElement = audio;
+      audio.crossOrigin = 'anonymous';
       audio.preload = 'auto';
       audio.src = EXPERIENCE_CONFIG.audioPath;
 

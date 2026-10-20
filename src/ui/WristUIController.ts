@@ -404,9 +404,17 @@ export class WristUIController {
       // Ensure matrices are up to date
       leftGrip.updateMatrixWorld();
       this.pokeAnchorMesh.updateMatrixWorld();
+
+      // Gate on both hands being present (incoming: avoids false triggers when only one hand tracked)
+      const hasLeft = leftGrip.visible || leftGrip.matrixWorld.elements[15] > 0;
+      const hasRight = (rightIndexTip?.visible || rightIndexTip?.matrixWorld?.elements[15] > 0)
+        || rightGrip.visible || rightGrip.matrixWorld.elements[15] > 0;
+      if (!hasLeft || !hasRight) return;
+
       this.scratchWristWorldPos.setFromMatrixPosition(this.pokeAnchorMesh.matrixWorld);
 
-      // Check distance from right index tip (hand tracking) or right grip/ray (controller)
+      // Check distance from right index tip (hand tracking) or right grip/ray (controller).
+      // Take the minimum across all available probe points (HEAD: maximises detection reliability).
       let minDist = Infinity;
       if (rightIndexTip) {
         rightIndexTip.updateMatrixWorld();

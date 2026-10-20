@@ -117,14 +117,20 @@ export class CityXRInput {
     const leftRay = this.world.player.raySpaces.left;
     const rightRay = this.world.player.raySpaces.right;
 
-    // Force matrix update to ensure fresh world coordinates
+    // Force matrix update to ensure fresh world coordinates (HEAD: required on Quest
+    // where IWSDK may not update grip spaces every frame before the app reads them)
     leftGrip.updateMatrixWorld();
     rightGrip.updateMatrixWorld();
     leftRay.updateMatrixWorld();
     rightRay.updateMatrixWorld();
 
-    const hasLeft = leftGrip.visible !== false && (leftGrip.matrixWorld.elements[15] > 0 || leftGrip.position.lengthSq() > 0.0001);
-    const hasRight = rightGrip.visible !== false && (rightGrip.matrixWorld.elements[15] > 0 || rightGrip.position.lengthSq() > 0.0001);
+    // Controller presence: visible flag + matrix position guard (HEAD) with XRSession
+    // inputSources as additional fallback when grip space is tracked but not yet visible (incoming)
+    const inputSources = this.xrSession?.inputSources ? Array.from(this.xrSession.inputSources) : [];
+    const hasLeft = (leftGrip.visible !== false && (leftGrip.matrixWorld.elements[15] > 0 || leftGrip.position.lengthSq() > 0.0001))
+      || inputSources.some(s => s.handedness === 'left');
+    const hasRight = (rightGrip.visible !== false && (rightGrip.matrixWorld.elements[15] > 0 || rightGrip.position.lengthSq() > 0.0001))
+      || inputSources.some(s => s.handedness === 'right');
 
     interactionDebugState.set({
       leftControllerDetected: hasLeft,
