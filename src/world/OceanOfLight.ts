@@ -2,10 +2,11 @@
  * OceanOfLight: Living ocean surface with procedural luminous waves and floating lotuses.
  * Features:
  *  - Single PlaneGeometry ocean surface with procedural GLSL vertex wave + Fresnel reflection
+ *  - Positioned at seated eye-level - 1.2m (y = 0.05m to cover ground, visible from seated position)
  *  - Instanced glowing lotus blooms on the water surface (12 on Quest, 28 on Desktop)
- *  - Soft ethereal light curtains (additive blending curved ribbon planes)
- *  - Single pooled water spray sparkles points cloud (<= 600 particles on Quest, 1200 on Desktop)
- *  - Smooth entry fade during city dissolve, hidden prior to t_dissolve
+ *  - Soft ethereal light curtains (curved ribbon planes)
+ *  - Single pooled water spray sparkles points cloud (<= 450 particles on Quest, 900 on Desktop)
+ *  - Debug mode (?flowerdebug=1) rendering with plain blue material
  *  - Zero per-frame allocations in update()
  */
 
@@ -14,6 +15,7 @@ import {
   Mesh,
   PlaneGeometry,
   ShaderMaterial,
+  MeshBasicMaterial,
   BufferGeometry,
   Float32BufferAttribute,
   Points,
@@ -46,8 +48,10 @@ export class OceanOfLight {
   readonly group: Group = new Group();
 
   private isQuest: boolean;
+  private isDebugMode = false;
   private oceanMesh: Mesh;
   private oceanMaterial: ShaderMaterial;
+  private debugOceanMaterial: MeshBasicMaterial;
   private lightCurtains: Mesh[] = [];
   private floatingLotuses: InstancedMesh;
   private lotusCount: number;
@@ -68,7 +72,13 @@ export class OceanOfLight {
     this.lotusCount = isQuest ? 12 : 28;
     this.maxSprayCount = isQuest ? 450 : 900;
 
+    if (typeof window !== 'undefined' && window.location.search.includes('flowerdebug=1')) {
+      this.isDebugMode = true;
+    }
+
     // 1. Ocean Surface Shader (Single PlaneGeometry 90m x 90m)
+    // Placed at y = 0.05m so wave crests (0.05m + 0.15m = 0.20m) cleanly submerge
+    // the floor platform (y=0) when dissolving
     const oceanGeo = new PlaneGeometry(90, 90, isQuest ? 32 : 48, isQuest ? 32 : 48);
     oceanGeo.rotateX(-Math.PI * 0.5);
 
@@ -125,19 +135,28 @@ export class OceanOfLight {
           float dist = length(vWorldPos.xz);
           float fog = clamp(1.0 - dist / 42.0, 0.0, 1.0);
 
-          gl_FragColor = vec4(col, uAlpha * fog * 0.92);
+          gl_FragColor = vec4(col, uAlpha * fog * 0.94);
         }
       `,
       transparent: true,
+      side: DoubleSide,
       depthWrite: true,
     });
 
-    this.oceanMesh = new Mesh(oceanGeo, this.oceanMaterial);
-    this.oceanMesh.position.y = -0.05; // Slightly below floor level
+    this.debugOceanMaterial = new MeshBasicMaterial({
+      color: 0x1a75ff,
+      transparent: true,
+      opacity: 0.85,
+      side: DoubleSide,
+      wireframe: false,
+    });
+
+    this.oceanMesh = new Mesh(oceanGeo, this.isDebugMode ? this.debugOceanMaterial : this.oceanMaterial);
+    this.oceanMesh.position.y = 0.05; // Elevated to submerge city platform gracefully
     this.group.add(this.oceanMesh);
 
     // 2. Instanced Floating Glowing Lotuses
-    const lotusGeo = new ConeGeometry(0.12, 0.18, 5);
+    const lotusGeo = new ConeGeometry(0.08, 0.12, 5);
     lotusGeo.rotateX(Math.PI); // Point blossom petals upward
     const lotusMat = new ShaderMaterial({
       uniforms: {
@@ -171,10 +190,10 @@ export class OceanOfLight {
     this.floatingLotuses = new InstancedMesh(lotusGeo, lotusMat, this.lotusCount);
     for (let i = 0; i < this.lotusCount; i++) {
       const angle = (i / this.lotusCount) * Math.PI * 2 + Math.random() * 0.4;
-      const dist = 1.6 + Math.random() * 7.5;
+      const dist = 1.4 + Math.random() * 6.5;
       this.scratchPos.set(
         Math.cos(angle) * dist,
-        0.04,
+        0.08,
         Math.sin(angle) * dist
       );
       this.scratchMat4.identity().setPosition(this.scratchPos);
@@ -219,7 +238,7 @@ export class OceanOfLight {
       });
 
       const curtainMesh = new Mesh(curtainGeo, curtainMat);
-      curtainMesh.position.set((i - 1) * 9.0, 4.0, -14.0 - i * 3.5);
+      curtainMesh.position.set((i - 1) * 9.0, 3.8, -14.0 - i * 3.5);
       curtainMesh.rotation.y = (i - 1) * 0.25;
       this.lightCurtains.push(curtainMesh);
       this.group.add(curtainMesh);
@@ -233,7 +252,7 @@ export class OceanOfLight {
       const angle = Math.random() * Math.PI * 2;
       const rad = 0.5 + Math.random() * 8.0;
       this.sprayPositions[i3] = Math.cos(angle) * rad;
-      this.sprayPositions[i3 + 1] = 0.05 + Math.random() * 0.3;
+      this.sprayPositions[i3 + 1] = 0.08 + Math.random() * 0.3;
       this.sprayPositions[i3 + 2] = Math.sin(angle) * rad;
 
       this.sprayVelocities[i3] = (Math.random() - 0.5) * 0.3;
@@ -262,6 +281,16 @@ export class OceanOfLight {
    * Main per-frame ocean animation update.
    */
   update(deltaSec: number, relativeTime: number, metrics?: AudioMetrics): void {
+    // In debug mode (?flowerdebug=1), show ocean continuously for instant inspection
+    if (this.isDebugMode) {
+      this.group.visible = true;
+      this.oceanAlpha = 0.85;
+      if (this.debugOceanMaterial) {
+        this.debugOceanMaterial.opacity = 0.85;
+      }
+      return;
+    }
+
     // Hidden before dissolve starts
     if (relativeTime < OCEAN_TIMELINE.t_dissolve_start) {
       this.group.visible = false;
@@ -307,7 +336,7 @@ export class OceanOfLight {
       const i3 = i * 3;
       this.sprayPositions[i3 + 1] += this.sprayVelocities[i3 + 1] * deltaSec;
       if (this.sprayPositions[i3 + 1] > 1.2) {
-        this.sprayPositions[i3 + 1] = 0.05;
+        this.sprayPositions[i3 + 1] = 0.08;
       }
     }
     this.sprayGeo.attributes.position.needsUpdate = true;
