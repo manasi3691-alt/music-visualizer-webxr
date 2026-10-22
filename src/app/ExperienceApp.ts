@@ -75,10 +75,10 @@ export class ExperienceApp {
           this.uiContainer.style.opacity = '0';
           this.uiContainer.style.pointerEvents = 'none';
         }
-        // Auto-start audio if the user enters XR before pressing Play
-        if (experienceState.phase === 'READY' || experienceState.phase === 'PAUSED') {
+        // Auto-start or resume audio if the user enters XR before pressing Play
+        if (experienceState.phase === 'READY' || experienceState.phase === 'PAUSED' || experienceState.phase === 'LOADING') {
           audioEngine.play().catch((err) => {
-            console.warn('[ExperienceApp] Play on XR active:', err);
+            console.warn('[ExperienceApp] Autoplay on XR active handled:', err);
           });
         }
       } else if (xrState === 'ENDED' || xrState === 'NONE') {
