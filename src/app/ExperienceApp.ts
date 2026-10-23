@@ -11,13 +11,14 @@ import { ExperienceWorld } from '../world/ExperienceWorld.js';
 import { experienceState, ExperiencePhase } from './ExperienceState.js';
 import { interactionRegistry } from '../interaction/InteractionRegistry.js';
 import { desktopInput } from '../desktop/DesktopInput.js';
-import { performanceMonitor } from '../performance/PerformanceMonitor.js';
 import { xrSetup } from '../xr/XRSetup.js';
+import { xrState } from '../xr/XRState.js';
 import { detectQualityProfile } from '../performance/QualityProfile.js';
 import { wristUIController } from '../ui/WristUIController.js';
 import { musicExcerpt } from '../audio/MusicExcerpt.js';
 import { cityXRInput } from '../city/CityXRInput.js';
 import { interactionDebugState } from '../interaction/InteractionDebugState.js';
+import { performanceMonitor } from '../performance/PerformanceMonitor.js';
 
 export let experienceWorld: ExperienceWorld | null = null;
 
@@ -45,8 +46,9 @@ export class ExperienceApp {
       rootEntity.object3D.add(experienceWorld.rootGroup);
     }
 
-    // 2. Setup XR integration
+    // 2. Setup XR integration — await support check so isSupported is ready before UI renders
     xrSetup.init(world);
+    await xrState.checkSupport();
     cityXRInput.init(world, experienceWorld.citySystem.interaction);
 
     // Listen to WebXR session lifecycle events directly from WebXRManager.
@@ -58,11 +60,14 @@ export class ExperienceApp {
         if (session) {
           cityXRInput.onXRActive(session);
           wristUIController.onSessionStart(session);
+          // Wire world into SoundBubbles for XR proximity detection
+          if (experienceWorld) experienceWorld.onXRSessionStart(world);
         }
       });
       webXRManager.addEventListener('sessionend', () => {
         cityXRInput.onXREnded();
         wristUIController.onSessionEnd();
+        if (experienceWorld) experienceWorld.onXRSessionEnd();
       });
     }
 
@@ -135,6 +140,10 @@ export class ExperienceApp {
     try {
       await audioEngine.load();
       experienceState.setPhase('READY');
+      // Re-render start UI now that audio is ready, so XR support state is correctly reflected
+      if (experienceState.phase === 'READY') {
+        this.renderStartUI();
+      }
     } catch (err) {
       console.error('[ExperienceApp] Audio load failed:', err);
       // Handled by experienceState
@@ -287,55 +296,59 @@ export class ExperienceApp {
 
   private renderStartUI(): void {
     if (!this.uiContainer) return;
+    const hasVR = xrState.isSupported;
+
     this.uiContainer.innerHTML = `
-      <div style="max-width: 480px; padding: 32px; background: rgba(255, 255, 255, 0.04); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(16px); box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
-        <h1 style="font-size: 40px; font-weight: 300; letter-spacing: 6px; margin: 0 0 8px 0; color: #f0f4ff; text-transform: uppercase;">EXPERIENCE</h1>
-        <p style="font-size: 16px; font-weight: 400; letter-spacing: 2px; color: #a2b4e0; margin: 0 0 28px 0;">Ludovico Einaudi</p>
+      <div style="max-width: 480px; padding: 32px; background: rgba(255, 255, 255, 0.04); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(16px); box-shadow: 0 20px 50px rgba(0,0,0,0.5); text-align: center;">
+        <h1 style="font-size: 38px; font-weight: 300; letter-spacing: 6px; margin: 0 0 8px 0; color: #f0f4ff; text-transform: uppercase;">EXPERIENCE</h1>
+        <p style="font-size: 15px; font-weight: 400; letter-spacing: 2px; color: #a2b4e0; margin: 0 0 24px 0;">Ludovico Einaudi</p>
 
         <div style="display: flex; flex-direction: column; gap: 12px; align-items: center; margin-bottom: 24px;">
-          <button id="btn-play" style="
+          <button id="btn-enter" style="
             background: linear-gradient(135deg, #4f68d9 0%, #7544b8 100%);
             border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 30px;
-            color: #ffffff; padding: 14px 36px; font-size: 15px; font-weight: 600;
+            color: #ffffff; padding: 16px 36px; font-size: 15px; font-weight: 600;
             letter-spacing: 2px; cursor: pointer; text-transform: uppercase;
             box-shadow: 0 8px 24px rgba(90, 70, 180, 0.4); transition: transform 0.2s, box-shadow 0.2s;
-          ">Play Experience</button>
+            width: 100%; max-width: 320px;
+          ">${hasVR ? '🥽 ENTER IMMERSIVE VR' : '▶ PLAY EXPERIENCE'}</button>
 
-          <button id="btn-xr" style="
-            display: inline-block;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 30px;
-            color: #d0dcff; padding: 10px 24px; font-size: 13px; font-weight: 500;
+          ${hasVR ? `
+          <button id="btn-desktop" style="
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 30px;
+            color: #9cb0dc; padding: 8px 20px; font-size: 12px; font-weight: 400;
             letter-spacing: 1px; cursor: pointer; transition: background 0.2s;
-          ">Enter WebXR</button>
+          ">Desktop 2D Preview</button>
+          ` : ''}
         </div>
 
         <div style="font-size: 13px; color: #8fa0c8; line-height: 1.6; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 16px;">
-          Remain seated. Look around.<br/>
-          Interact with the world through touch, grab, and music.
+          ${hasVR
+            ? 'Put on your Meta Quest headset. Remain seated.<br/>Look around in 360° to explore the cosmic architecture.'
+            : 'Remain seated. Look around.<br/>Interact with the world through touch, grab, and music.'}
         </div>
       </div>
     `;
 
-    const playBtn = document.getElementById('btn-play');
-    playBtn?.addEventListener('click', () => this.start());
+    const enterBtn = document.getElementById('btn-enter');
+    enterBtn?.addEventListener('click', () => {
+      // 1. Kick off audio asynchronously within user gesture (do not await!)
+      audioEngine.play().catch((err) => {
+        console.warn('[ExperienceApp] Audio play on entry:', err);
+      });
 
-    const xrBtn = document.getElementById('btn-xr');
-    xrBtn?.addEventListener('click', async () => {
-      // User gesture requirement: trigger AudioContext resume and start playback before requesting XR session.
-      // Handles all states: not playing, already playing but context suspended, or audio already running.
-      try {
-        if (!audioEngine.isPlaying) {
-          console.log('[ExperienceApp] Starting audio on Enter WebXR user gesture...');
-          await audioEngine.play();
-        } else if (audioEngine.context && audioEngine.context.state === 'suspended') {
-          console.log('[ExperienceApp] Resuming suspended AudioContext on Enter WebXR user gesture...');
-          await audioEngine.context.resume();
-        }
-      } catch (audioErr) {
-        console.warn('[ExperienceApp] Audio start on Enter WebXR encountered:', audioErr);
+      if (hasVR) {
+        // 2. Synchronously invoke launchXR() so navigator.xr.requestSession retains the user activation
+        xrSetup.launchXR();
+      } else {
+        this.start();
       }
-      await xrSetup.launchXR();
+    });
+
+    const desktopBtn = document.getElementById('btn-desktop');
+    desktopBtn?.addEventListener('click', () => {
+      this.start();
     });
   }
 

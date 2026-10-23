@@ -17,24 +17,25 @@ export const EXPERIENCE_CONFIG = {
   composer: 'Ludovico Einaudi',
   audioPath: './audio/experience.mp3',
 
-  // Authored musical excerpt from the real recording (38.0s duration)
-  // 240.0s (4:00) downbeat through 278.0s (4:38) sudden release and piano decay
+  // 3-minute (180s) visual experience mapped across the full audio track.
+  // Experience.mp3 from 0s to 180s covers the building arc of the piece.
+  // If the track is shorter, the audio ends naturally and visuals transition to release.
   excerpt: {
-    sourceStart: 240.0,
-    sourceEnd: 278.0,
-    duration: 38.0,
+    sourceStart: 0.0,
+    sourceEnd: 180.0,
+    duration: 180.0,
   },
 
   // Cosmic color progression per musical movement
   // Palette: midnight blue · deep charcoal · muted teal · ivory · restrained gold
   colors: {
     arrival: {
-      sky:           [0.05, 0.09, 0.18],   // Deep midnight blue
-      equator:       [0.08, 0.14, 0.26],   // Indigo horizon
-      ground:        [0.03, 0.05, 0.09],   // Near-black charcoal
-      primaryAccent: [0.45, 0.62, 0.80],   // Dusty blue-ivory
-      warmAccent:    [0.78, 0.72, 0.60],   // Muted warm ivory
-      intensity: 0.75,
+      sky:           [0.04, 0.07, 0.15],   // Deep midnight blue — quieter than before
+      equator:       [0.06, 0.11, 0.22],   // Indigo horizon
+      ground:        [0.02, 0.04, 0.08],   // Near-black charcoal
+      primaryAccent: [0.38, 0.52, 0.72],   // Dusty blue-ivory
+      warmAccent:    [0.68, 0.62, 0.52],   // Muted warm ivory
+      intensity: 0.55,
     } as ColorStop,
 
     discovery: {

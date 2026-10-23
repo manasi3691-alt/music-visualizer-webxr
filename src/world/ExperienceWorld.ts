@@ -1,7 +1,7 @@
 /**
  * ExperienceWorld: Central Three.js scene root for the visual systems.
  * Manages one continuous world, coordinating atmosphere, forms,
- * structures, waves, particles, and lighting.
+ * structures, waves, particles, lighting, dense architecture, and bubbles.
  */
 
 import { Group, Vector3 } from '@iwsdk/core';
@@ -12,6 +12,8 @@ import { Waves } from './Waves.js';
 import { Particles } from './Particles.js';
 import { LightingSystem } from './LightingSystem.js';
 import { CitySystem } from '../city/CitySystem.js';
+import { ImmersiveArchitecture } from './ImmersiveArchitecture.js';
+import { SoundBubbles } from './SoundBubbles.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
@@ -31,6 +33,8 @@ export class ExperienceWorld {
   readonly citySystem: CitySystem;
   readonly shootingStarUniverse: ShootingStarUniverse;
   readonly solarSystem: SolarSystem;
+  readonly immersiveArchitecture: ImmersiveArchitecture;
+  readonly soundBubbles: SoundBubbles;
 
   private waveOrigin = new Vector3(0, 1.1, -1.0);
 
@@ -45,6 +49,8 @@ export class ExperienceWorld {
     this.shootingStarUniverse = new ShootingStarUniverse(isQuest);
     this.shootingStarUniverse.setCityRef(this.citySystem.group);
     this.solarSystem = new SolarSystem(isQuest);
+    this.immersiveArchitecture = new ImmersiveArchitecture(isQuest);
+    this.soundBubbles = new SoundBubbles();
 
     // Assemble single persistent scene graph
     this.rootGroup.add(this.atmosphere.group);
@@ -56,6 +62,8 @@ export class ExperienceWorld {
     this.rootGroup.add(this.waves.group);
     this.rootGroup.add(this.shootingStarUniverse.group);
     this.rootGroup.add(this.solarSystem.group);
+    this.rootGroup.add(this.immersiveArchitecture.group);
+    this.rootGroup.add(this.soundBubbles.group);
   }
 
   /**
@@ -89,6 +97,17 @@ export class ExperienceWorld {
   }
 
   /**
+   * Wire XR world into SoundBubbles for proximity detection
+   */
+  onXRSessionStart(world: World): void {
+    this.soundBubbles.setXRWorld(world);
+  }
+
+  onXRSessionEnd(): void {
+    this.soundBubbles.clearXRWorld();
+  }
+
+  /**
    * Update visual systems in strict order (Section 41)
    */
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number, world?: World, camera?: Camera): void {
@@ -99,18 +118,24 @@ export class ExperienceWorld {
     // 2. City procedural evolution (music-driven)
     this.citySystem.update(frameData, metrics, deltaSec);
 
-    // 3. Primary & secondary geometry
+    // 3. Dense immersive architecture (music-synchronized)
+    this.immersiveArchitecture.update(frameData, metrics, deltaSec);
+
+    // 4. Primary & secondary geometry
     this.organicForms.update(frameData, metrics, deltaSec);
     this.structures.update(frameData, metrics, deltaSec);
 
-    // 4. Dynamic effects: particles & waves
+    // 5. Dynamic effects: particles & waves
     this.particles.update(frameData, metrics, deltaSec);
     this.waves.update(frameData, metrics, deltaSec);
 
-    // 5. Climax event: Shooting star & Universe transition
+    // 6. Sound bubbles (float + pop interaction)
+    this.soundBubbles.update(frameData, metrics, deltaSec);
+
+    // 7. Climax event: Shooting star & Universe transition
     this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, world, camera);
 
-    // 6. Interactive 3D Solar System (reveals after universe transition)
+    // 8. Interactive 3D Solar System (reveals after universe transition)
     this.solarSystem.update(deltaSec, frameData.relativeTime, world, camera);
   }
 
@@ -118,6 +143,8 @@ export class ExperienceWorld {
     this.citySystem.reset();
     this.shootingStarUniverse.reset();
     this.solarSystem.reset();
+    this.immersiveArchitecture.reset();
+    this.soundBubbles.reset();
   }
 
   dispose(): void {
@@ -130,7 +157,8 @@ export class ExperienceWorld {
     this.lighting.dispose();
     this.shootingStarUniverse.dispose();
     this.solarSystem.dispose();
+    this.immersiveArchitecture.dispose();
+    this.soundBubbles.dispose();
     this.rootGroup.clear();
   }
 }
-

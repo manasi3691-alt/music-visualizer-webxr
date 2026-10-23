@@ -95,6 +95,13 @@ export class DesktopInput {
       }
     }
 
+    // Check if user clicked an interactive sound bubble
+    if (experienceWorld?.soundBubbles) {
+      this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const popped = experienceWorld.soundBubbles.hitTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
+      if (popped) return;
+    }
+
     // Check if user clicked an interactive city building block
     if (experienceWorld?.citySystem) {
       const hitBlock = experienceWorld.citySystem.interaction.hitTest(this.camera, this.mouseVec);
