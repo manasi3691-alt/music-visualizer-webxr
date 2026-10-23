@@ -68,6 +68,29 @@ export class MusicalConductor {
         experienceState.setPhase('COMPLETE');
         audioEngine.stop();
       }
+    } else if (audioEngine.isPlaying) {
+      // Synchronize authoritative state machine phases with authored timeline
+      if (relTime < 6.0 && experienceState.phase !== 'CITY_GROWING') {
+        experienceState.setPhase('CITY_GROWING');
+      } else if (relTime >= 6.0 && relTime < 8.0 && experienceState.phase !== 'FLOWER_SPAWNING') {
+        experienceState.setPhase('FLOWER_SPAWNING');
+      } else if (relTime >= 8.0 && relTime < 12.0 && experienceState.phase !== 'FLOWER_APPROACHING') {
+        experienceState.setPhase('FLOWER_APPROACHING');
+      } else if (relTime >= 12.0 && relTime < 24.0 && experienceState.phase !== 'FLOWER_WAITING_FOR_TOUCH') {
+        experienceState.setPhase('FLOWER_WAITING_FOR_TOUCH');
+      } else if (relTime >= 24.0 && relTime < 27.5 && experienceState.phase !== 'CITY_DISSOLVING') {
+        experienceState.setPhase('CITY_DISSOLVING');
+      } else if (relTime >= 27.5 && relTime < 28.5 && experienceState.phase !== 'OCEAN_ALIVE') {
+        experienceState.setPhase('OCEAN_ALIVE');
+      } else if (relTime >= 28.5 && relTime < 31.0 && experienceState.phase !== 'SHOOTING_STAR_FROM_OCEAN') {
+        experienceState.setPhase('SHOOTING_STAR_FROM_OCEAN');
+      } else if (relTime >= 31.0 && relTime < 34.0 && experienceState.phase !== 'UNIVERSE') {
+        experienceState.setPhase('UNIVERSE');
+      } else if (relTime >= 34.0 && relTime < 37.0 && experienceState.phase !== 'SOLAR_SYSTEM') {
+        experienceState.setPhase('SOLAR_SYSTEM');
+      } else if (relTime >= 37.0 && relTime < 38.0 && experienceState.phase !== 'RELEASE') {
+        experienceState.setPhase('RELEASE');
+      }
     }
 
     // Identify active cue based on relative time

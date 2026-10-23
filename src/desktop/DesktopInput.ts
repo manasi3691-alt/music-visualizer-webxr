@@ -113,6 +113,18 @@ export class DesktopInput {
       }
     }
 
+    // Check if user clicked the glowing flower
+    if (experienceWorld?.glowingFlower?.group.visible) {
+      this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const intersects = this.raycaster.intersectObject(experienceWorld.glowingFlower.collisionSphere, true);
+      if (intersects.length > 0) {
+        if (experienceWorld.glowingFlower.triggerTouch()) {
+          experienceWorld.handleTouch(intersects[0].point);
+          return;
+        }
+      }
+    }
+
     // Trigger touch ripple on forward click
     if (interactionRegistry.isTouchAvailable()) {
       interactionRegistry.onTouch('primary-ribbon');

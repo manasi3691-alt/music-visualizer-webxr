@@ -35,6 +35,7 @@ export class CityXRInput {
   // Reusable scratch objects
   private scratchMat4 = new Matrix4();
   private scratchVec = new Vector3();
+  private scratchPos2 = new Vector3();
 
   // Bound listeners
   private boundOnSelectStart: ((e: Event) => void) | null = null;
@@ -136,6 +137,38 @@ export class CityXRInput {
       leftControllerDetected: hasLeft,
       rightControllerDetected: hasRight,
     });
+
+    // Check GlowingFlower poke/touch in WebXR
+    if (experienceWorld?.glowingFlower?.group.visible && !experienceWorld.glowingFlower.touched) {
+      const flowerPos = experienceWorld.glowingFlower.collisionSphere.position;
+      const flowerWorldPos = this.scratchVec.setFromMatrixPosition(experienceWorld.glowingFlower.collisionSphere.matrixWorld);
+
+      // Check proximity with index tip (hand tracking) or grip (controller)
+      const player = this.world.player as any;
+      const rightIndexTip = player?.indexTipSpaces?.right;
+      const leftIndexTip = player?.indexTipSpaces?.left;
+
+      let touching = false;
+      const testProximity = (space: any, threshold: number) => {
+        if (!space) return false;
+        space.updateMatrixWorld();
+        this.scratchPos2.setFromMatrixPosition(space.matrixWorld);
+        return this.scratchPos2.distanceTo(flowerWorldPos) <= threshold;
+      };
+
+      // 1. Hand tracking index tip proximity (18cm radius)
+      if (testProximity(rightIndexTip, 0.18) || testProximity(leftIndexTip, 0.18)) {
+        touching = true;
+      }
+      // 2. Controller grip proximity (24cm radius)
+      else if (testProximity(rightGrip, 0.24) || testProximity(leftGrip, 0.24)) {
+        touching = true;
+      }
+
+      if (touching && experienceWorld.glowingFlower.triggerTouch()) {
+        experienceWorld.handleTouch(flowerWorldPos);
+      }
+    }
 
     // 1. If currently grabbing, follow the holding controller's grip space
     if (this._activeGrabbedBlock && this.activeHand) {

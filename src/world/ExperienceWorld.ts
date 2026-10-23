@@ -19,6 +19,8 @@ import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
 import { ShootingStarUniverse } from '../cinematic/ShootingStarUniverse.js';
 import { SolarSystem } from '../cinematic/SolarSystem.js';
+import { GlowingFlower } from './GlowingFlower.js';
+import { OceanOfLight } from './OceanOfLight.js';
 import { Camera, World } from '@iwsdk/core';
 
 export class ExperienceWorld {
@@ -31,6 +33,8 @@ export class ExperienceWorld {
   readonly particles: Particles;
   readonly lighting: LightingSystem;
   readonly citySystem: CitySystem;
+  readonly glowingFlower: GlowingFlower;
+  readonly oceanOfLight: OceanOfLight;
   readonly shootingStarUniverse: ShootingStarUniverse;
   readonly solarSystem: SolarSystem;
   readonly immersiveArchitecture: ImmersiveArchitecture;
@@ -46,6 +50,8 @@ export class ExperienceWorld {
     this.particles = new Particles(isQuest);
     this.lighting = new LightingSystem();
     this.citySystem = new CitySystem(isQuest);
+    this.glowingFlower = new GlowingFlower(isQuest);
+    this.oceanOfLight = new OceanOfLight(isQuest);
     this.shootingStarUniverse = new ShootingStarUniverse(isQuest);
     this.shootingStarUniverse.setCityRef(this.citySystem.group);
     this.solarSystem = new SolarSystem(isQuest);
@@ -55,9 +61,11 @@ export class ExperienceWorld {
     // Assemble single persistent scene graph
     this.rootGroup.add(this.atmosphere.group);
     this.rootGroup.add(this.lighting.group);
+    this.rootGroup.add(this.oceanOfLight.group);
     this.rootGroup.add(this.citySystem.group);
     this.rootGroup.add(this.structures.group);
     this.rootGroup.add(this.organicForms.group);
+    this.rootGroup.add(this.glowingFlower.group);
     this.rootGroup.add(this.particles.group);
     this.rootGroup.add(this.waves.group);
     this.rootGroup.add(this.shootingStarUniverse.group);
@@ -118,10 +126,20 @@ export class ExperienceWorld {
     // 2. City procedural evolution (music-driven)
     this.citySystem.update(frameData, metrics, deltaSec);
 
+<<<<<<< HEAD
     // 3. Dense immersive architecture (music-synchronized)
     this.immersiveArchitecture.update(frameData, metrics, deltaSec);
 
     // 4. Primary & secondary geometry
+=======
+    // 2.5 Flower approach and touch interaction
+    this.glowingFlower.update(deltaSec, frameData.relativeTime, metrics, world, camera);
+
+    // 2.6 Living Ocean of Light
+    this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics);
+
+    // 3. Primary & secondary geometry
+>>>>>>> origin/main
     this.organicForms.update(frameData, metrics, deltaSec);
     this.structures.update(frameData, metrics, deltaSec);
 
@@ -141,6 +159,8 @@ export class ExperienceWorld {
 
   reset(): void {
     this.citySystem.reset();
+    this.glowingFlower.reset();
+    this.oceanOfLight.reset();
     this.shootingStarUniverse.reset();
     this.solarSystem.reset();
     this.immersiveArchitecture.reset();
@@ -152,6 +172,8 @@ export class ExperienceWorld {
     this.organicForms.dispose();
     this.structures.dispose();
     this.citySystem.dispose();
+    this.glowingFlower.dispose();
+    this.oceanOfLight.dispose();
     this.waves.dispose();
     this.particles.dispose();
     this.lighting.dispose();

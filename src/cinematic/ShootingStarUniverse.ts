@@ -44,8 +44,8 @@ export const CINEMATIC_TIMELINE: ShootingStarTimelineConfig = {
   t0_spawn: 28.5,
   t1_impact: 31.0,
   t2_burst: 31.0,
-  t3_dissolve: 31.5,
-  t4_universe: 34.0,
+  t3_dissolve: 24.0, // City begins dissolving to ocean at flower touch
+  t4_universe: 34.0, // Fully dissolved before/during universe reveal
   t5_settle: 36.5,
 };
 
@@ -371,18 +371,18 @@ export class ShootingStarUniverse {
       .addScaledVector(this.scratchForward, targetDistance);
     this.starTargetPos.y = Math.max(1.3, this.scratchHeadPos.y + elevation);
 
-    // Keep spawn position relative to focal axis high up
+    // RETARGET: Shooting star fires from the ocean water surface/horizon and arcs upward into the sky
     this.starSpawnPos.set(
-      this.starTargetPos.x + 6.0,
-      this.starTargetPos.y + 26.0,
-      this.starTargetPos.z - 36.0
+      this.starTargetPos.x + 4.5,
+      0.08,                          // At ocean water level (fires from ocean)
+      this.starTargetPos.z - 28.0    // Distant ocean horizon
     );
 
-    // Mid control point for graceful curved swoop
+    // Mid control point for graceful upward ascending arc
     this.starControlPos.set(
-      this.starTargetPos.x + 2.5,
-      this.starTargetPos.y + 10.0,
-      this.starTargetPos.z - 14.0
+      this.starTargetPos.x + 2.0,
+      this.starTargetPos.y + 4.5,    // Ascending upward through ocean sky
+      this.starTargetPos.z - 12.0
     );
   }
 
