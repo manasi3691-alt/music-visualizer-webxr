@@ -1,6 +1,6 @@
 /**
- * Authored music excerpt definitions and time mapping
- * For Ludovico Einaudi - "Experience"
+ * Authored music timeline definitions and time mapping
+ * For "A Sky Full of Stars" (266.92s full duration)
  */
 
 import { EXPERIENCE_CONFIG } from '../app/ExperienceConfig.js';

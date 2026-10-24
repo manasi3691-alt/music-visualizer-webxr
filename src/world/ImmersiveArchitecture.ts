@@ -27,6 +27,8 @@ import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 interface ArchBuilding {
   mesh: Mesh;
   mat: MeshStandardMaterial;
+  windowMesh: Mesh;
+  windowMat: MeshStandardMaterial;
   // Full-height Y scale at climax (before audio modulation)
   targetScaleY: number;
   // Current Y scale being animated toward targetScaleY
@@ -173,9 +175,27 @@ export class ImmersiveArchitecture {
         mesh.rotation.y = rng() * Math.PI;
         this.group.add(mesh);
 
+        // Add thin golden window plane as child of building
+        const windowGeo = new BoxGeometry(scaleX * 0.9, targetH * 0.8, 0.02);
+        const windowMat = new MeshStandardMaterial({
+          color: 0xd8b040, // warm gold
+          emissive: 0xffd060,
+          emissiveIntensity: 0.0,
+          transparent: true,
+          opacity: 0.0,
+          depthWrite: false,
+        });
+        const windowMesh = new Mesh(windowGeo, windowMat);
+        windowMesh.position.set(0, targetH * 0.5, 0.1);
+        mesh.add(windowMesh);
+        
+        // Store references (no extra group addition needed)
+
         this.buildings.push({
           mesh,
           mat,
+          windowMesh,
+          windowMat,
           targetScaleY: targetH,
           currentScaleY: 0.001,
           baseY: 0,
@@ -249,6 +269,8 @@ export class ImmersiveArchitecture {
       // Climax boost: norm >= 0.78 (140/180)
       const climaxBoost = norm >= 0.78 ? (norm - 0.78) / 0.10 * 0.4 : 0.0;
       b.mat.emissiveIntensity = Math.min(0.9, baseEmissive + climaxBoost);
+      // Window glow reacts to high frequencies
+      b.windowMat.emissiveIntensity = Math.min(0.7, high * 0.8 + climaxBoost);
 
       // Color pulse on strong bass hits (keep as color property not allocation)
       if (low > 0.7) {
@@ -272,6 +294,8 @@ export class ImmersiveArchitecture {
       b.mesh.position.y = 0;
       b.mat.opacity = 0;
       b.mat.emissiveIntensity = 0.15;
+      b.windowMat.emissiveIntensity = 0.0;
+      b.windowMat.opacity = 0.0;
     }
   }
 
@@ -279,6 +303,7 @@ export class ImmersiveArchitecture {
     // Dispose materials (geometries are shared/pooled, dispose once)
     for (const b of this.buildings) {
       b.mat.dispose();
+      b.windowMat.dispose();
     }
     this.buildings.length = 0;
     for (const geo of this.geoPool.values()) {

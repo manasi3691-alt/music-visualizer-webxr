@@ -1,13 +1,9 @@
 /**
- * CueSheet: Authored cinematic cue events anchored to the real audio excerpt.
- * 3-Minute (180s) visual experience timeline:
- *
- *   0–30s   ARRIVAL    — Calm intro; buildings gently emerge
- *   30–60s  DISCOVERY  — More structures rise; environment develops
- *   60–100s DEVELOPMENT — Architecture grows taller; movement richer
- *   100–140s BUILD      — Coordinated visual build; expressive audio reactions
- *   140–165s CLIMAX_PREP/CLIMAX — Densest, tallest architecture; visual peak
- *   165–180s RELEASE   — Gradual beautiful release into calm ending
+ * CueSheet: Authored cinematic cue events anchored to the real 266.92s audio track.
+ * Three-Phase Journey Timeline:
+ *   Phase 1: Rising City (0s – 55s)
+ *   Phase 2: Aurora, Crystal Lotus and Cosmic Ocean (55s – 165s, ~1m50s dedicated progression)
+ *   Phase 3: Cosmic Ascent & Interactive Solar System (165s – 266.92s)
  */
 
 export type CinematicEventType =
@@ -22,8 +18,8 @@ export type CinematicEventType =
 
 export interface CinematicCue {
   id: string;
-  relativeTime: number; // Seconds from excerpt start (0 to 180.0)
-  absoluteTime: number; // Seconds in audio.currentTime (0 to 180.0)
+  relativeTime: number; // Seconds from track start (0 to 266.92)
+  absoluteTime: number; // Seconds in audio.currentTime (0 to 266.92)
   event: CinematicEventType;
   duration: number;     // Active duration for transition
   description: string;
@@ -31,65 +27,81 @@ export interface CinematicCue {
 
 export const CUE_SHEET: CinematicCue[] = [
   {
-    id: 'cue-arrival',
+    id: 'cue-city-arrival',
     relativeTime: 0.0,
     absoluteTime: 0.0,
     event: 'ARRIVAL',
-    duration: 30.0,
-    description: 'Calm introduction. Buildings gently emerge from the ground. Deep midnight atmosphere.',
+    duration: 18.0,
+    description: 'Phase 1: Piano chord intro. City foundation and calm buildings gently emerge from the ground.',
   },
   {
-    id: 'cue-discovery',
-    relativeTime: 30.0,
-    absoluteTime: 30.0,
+    id: 'cue-city-discovery',
+    relativeTime: 18.0,
+    absoluteTime: 18.0,
     event: 'DISCOVERY',
-    duration: 30.0,
-    description: 'First wave of structures rises as the music develops. Touch interaction available.',
+    duration: 18.0,
+    description: 'Phase 1: Vocals enter. Structures rise as the music develops; interactive block available.',
   },
   {
-    id: 'cue-development',
-    relativeTime: 60.0,
-    absoluteTime: 60.0,
+    id: 'cue-city-build',
+    relativeTime: 36.0,
+    absoluteTime: 36.0,
     event: 'DEVELOPMENT',
-    duration: 40.0,
-    description: 'Architecture grows taller and movement becomes richer. Grab interaction available.',
+    duration: 19.0,
+    description: 'Phase 1: Groove builds. Architecture reaches full heights and illumination before the transition.',
   },
   {
-    id: 'cue-build',
-    relativeTime: 100.0,
-    absoluteTime: 100.0,
+    id: 'cue-aurora-transition',
+    relativeTime: 55.0,
+    absoluteTime: 55.0,
     event: 'BUILD',
-    duration: 40.0,
-    description: 'Coordinated visual build with increasingly expressive audio reactions. Full 360° world active.',
-  },
-  {
-    id: 'cue-climax-prep',
-    relativeTime: 140.0,
-    absoluteTime: 140.0,
-    event: 'CLIMAX_PREP',
     duration: 10.0,
-    description: 'Rapid harmonic tension. Gold accents intensify. Full architecture revealed.',
+    description: 'Transition: City dissolves into thousands of luminous particles and flowing Icelandic aurora ribbons.',
   },
   {
-    id: 'cue-climax',
-    relativeTime: 150.0,
-    absoluteTime: 150.0,
+    id: 'cue-crystal-lotus-ocean',
+    relativeTime: 65.0,
+    absoluteTime: 65.0,
+    event: 'DISCOVERY',
+    duration: 65.0,
+    description: 'Phase 2: Living Cosmic Ocean of light, reflective water, translucent Crystal Lotus, and floating sound bubbles.',
+  },
+  {
+    id: 'cue-ocean-climax-prep',
+    relativeTime: 130.0,
+    absoluteTime: 130.0,
+    event: 'CLIMAX_PREP',
+    duration: 35.0,
+    description: 'Phase 2 Build: Dynamic harmonic tension. Ocean waves, glowing lotus veins, and aurora ribbons build in intensity.',
+  },
+  {
+    id: 'cue-cosmic-ascent',
+    relativeTime: 165.0,
+    absoluteTime: 165.0,
     event: 'CLIMAX',
-    duration: 15.0,
-    description: 'Main visual climax. Densest, tallest architecture. Peak emotional and visual bloom.',
+    duration: 10.0,
+    description: 'Transition: Climax downbeat. Ocean currents rise upward into flowing light trails and disperse into stars.',
+  },
+  {
+    id: 'cue-solar-system',
+    relativeTime: 175.0,
+    absoluteTime: 175.0,
+    event: 'CLIMAX',
+    duration: 75.0,
+    description: 'Phase 3: Interactive Solar System emerges in deep cosmos with full hand grabbing and orbital interaction.',
   },
   {
     id: 'cue-release',
-    relativeTime: 165.0,
-    absoluteTime: 165.0,
+    relativeTime: 250.0,
+    absoluteTime: 250.0,
     event: 'RELEASE',
-    duration: 15.0,
-    description: 'Gradual beautiful release. Geometry softly dissolves into gentle mist.',
+    duration: 16.92,
+    description: 'Outro: Music gently releases into serene piano chords. Planets settle in tranquil final orbits.',
   },
   {
     id: 'cue-complete',
-    relativeTime: 180.0,
-    absoluteTime: 180.0,
+    relativeTime: 266.92,
+    absoluteTime: 266.92,
     event: 'COMPLETE',
     duration: 1.0,
     description: 'The journey rests. Replay prompt appears gracefully.',

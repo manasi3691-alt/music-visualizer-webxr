@@ -448,9 +448,9 @@ export class SolarSystem {
    * Main update driven by existing audio clock.
    */
   update(deltaSec: number, relativeTime: number, world?: World, camera?: Camera): void {
-    // Reveal solar system at t4_universe (34.0s)
-    const REVEAL_START = 34.0;
-    const REVEAL_END = 36.5;
+    // Reveal solar system at Phase 3 (175.0s, following dedicated 55s-165s lotus/ocean and cosmic ascent)
+    const REVEAL_START = 175.0;
+    const REVEAL_END = 178.5;
 
     if (relativeTime >= REVEAL_START && !this.isRevealed) {
       this.isRevealed = true;

@@ -13,6 +13,7 @@ import { Particles } from './Particles.js';
 import { LightingSystem } from './LightingSystem.js';
 import { CitySystem } from '../city/CitySystem.js';
 import { ImmersiveArchitecture } from './ImmersiveArchitecture.js';
+import { GoldenSanctuary } from './GoldenSanctuary.js';
 import { SoundBubbles } from './SoundBubbles.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
@@ -38,9 +39,11 @@ export class ExperienceWorld {
   readonly shootingStarUniverse: ShootingStarUniverse;
   readonly solarSystem: SolarSystem;
   readonly immersiveArchitecture: ImmersiveArchitecture;
+  readonly goldenSanctuary: GoldenSanctuary;
   readonly soundBubbles: SoundBubbles;
 
   private waveOrigin = new Vector3(0, 1.1, -1.0);
+  private scratchHandPos = new Vector3();
 
   constructor(isQuest = false) {
     this.atmosphere = new Atmosphere();
@@ -56,6 +59,7 @@ export class ExperienceWorld {
     this.shootingStarUniverse.setCityRef(this.citySystem.group);
     this.solarSystem = new SolarSystem(isQuest);
     this.immersiveArchitecture = new ImmersiveArchitecture(isQuest);
+    this.goldenSanctuary = new GoldenSanctuary(isQuest);
     this.soundBubbles = new SoundBubbles();
 
     // Assemble single persistent scene graph
@@ -71,6 +75,7 @@ export class ExperienceWorld {
     this.rootGroup.add(this.shootingStarUniverse.group);
     this.rootGroup.add(this.solarSystem.group);
     this.rootGroup.add(this.immersiveArchitecture.group);
+    this.rootGroup.add(this.goldenSanctuary.group);
     this.rootGroup.add(this.soundBubbles.group);
   }
 
@@ -81,6 +86,16 @@ export class ExperienceWorld {
     this.organicForms.triggerTouchRipple();
     const pos = targetPos || this.waveOrigin;
     this.waves.emitWave(pos, 3.8, 3.0);
+
+    // If touching near the crystal lotus flower, trigger petal glow & sway reaction
+    if (this.glowingFlower.group.visible) {
+      this.glowingFlower.triggerTouch();
+    }
+
+    // If reaching into the cosmic water (y <= 0.45m), emit expanding luminous cyan/teal ripple
+    if (pos.y <= 0.45 && this.oceanOfLight.group.visible) {
+      this.waves.emitWave(new Vector3(pos.x, 0.08, pos.z), 4.8, 2.4, [0.15, 0.85, 0.95]);
+    }
   }
 
   /**
@@ -126,20 +141,38 @@ export class ExperienceWorld {
     // 2. City procedural evolution (music-driven)
     this.citySystem.update(frameData, metrics, deltaSec);
 
-<<<<<<< HEAD
     // 3. Dense immersive architecture (music-synchronized)
     this.immersiveArchitecture.update(frameData, metrics, deltaSec);
+    this.goldenSanctuary.update(frameData, metrics, deltaSec);
 
-    // 4. Primary & secondary geometry
-=======
-    // 2.5 Flower approach and touch interaction
+    // 3.5 Flower approach and touch interaction
     this.glowingFlower.update(deltaSec, frameData.relativeTime, metrics, world, camera);
 
-    // 2.6 Living Ocean of Light
+    // 3.6 Living Ocean of Light
     this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics);
 
-    // 3. Primary & secondary geometry
->>>>>>> origin/main
+    // 3.7 WebXR controller proximity interactions (lotus touch & ocean surface reach)
+    if (world?.renderer?.xr?.isPresenting) {
+      for (let i = 0; i < 2; i++) {
+        const controller = world.renderer.xr.getController(i);
+        if (controller) {
+          controller.getWorldPosition(this.scratchHandPos);
+          if (this.glowingFlower.group.visible) {
+            const flowerPos = this.glowingFlower.flowerRoot.position;
+            if (this.scratchHandPos.distanceTo(flowerPos) < 0.28) {
+              this.glowingFlower.triggerTouch();
+            }
+          }
+          if (this.oceanOfLight.group.visible && this.scratchHandPos.y <= 0.25 && this.scratchHandPos.y >= -0.2) {
+            if (Math.random() < 0.1) {
+              this.waves.emitWave(new Vector3(this.scratchHandPos.x, 0.08, this.scratchHandPos.z), 3.6, 2.2, [0.15, 0.85, 0.95]);
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Primary & secondary geometry
     this.organicForms.update(frameData, metrics, deltaSec);
     this.structures.update(frameData, metrics, deltaSec);
 
@@ -164,6 +197,7 @@ export class ExperienceWorld {
     this.shootingStarUniverse.reset();
     this.solarSystem.reset();
     this.immersiveArchitecture.reset();
+    this.goldenSanctuary.reset();
     this.soundBubbles.reset();
   }
 
@@ -180,6 +214,7 @@ export class ExperienceWorld {
     this.shootingStarUniverse.dispose();
     this.solarSystem.dispose();
     this.immersiveArchitecture.dispose();
+    this.goldenSanctuary.dispose();
     this.soundBubbles.dispose();
     this.rootGroup.clear();
   }

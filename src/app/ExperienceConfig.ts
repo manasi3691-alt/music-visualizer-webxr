@@ -13,17 +13,18 @@ export interface ColorStop {
 }
 
 export const EXPERIENCE_CONFIG = {
-  projectTitle: 'EXPERIENCE',
-  composer: 'Ludovico Einaudi',
-  audioPath: './audio/experience.mp3',
+  projectTitle: 'A SKY FULL OF STARS',
+  composer: 'The Hit Crew Kids / Coldplay',
+  audioPath: './audio/sky_full_of_stars.mp3',
 
-  // 3-minute (180s) visual experience mapped across the full audio track.
-  // Experience.mp3 from 0s to 180s covers the building arc of the piece.
-  // If the track is shorter, the audio ends naturally and visuals transition to release.
+  // Full continuous audio track journey (266.92s / ~4m 27s):
+  // Phase 1 (Rising City): 0s – 55s
+  // Phase 2 (Aurora, Lotus & Cosmic Ocean): 55s – 165s (~1m50s)
+  // Phase 3 (Cosmic Ascent & Interactive Solar System): 165s – 266.92s
   excerpt: {
     sourceStart: 0.0,
-    sourceEnd: 180.0,
-    duration: 180.0,
+    sourceEnd: 266.92,
+    duration: 266.92,
   },
 
   // Cosmic color progression per musical movement

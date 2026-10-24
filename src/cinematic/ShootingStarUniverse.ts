@@ -41,12 +41,12 @@ export interface ShootingStarTimelineConfig {
 }
 
 export const CINEMATIC_TIMELINE: ShootingStarTimelineConfig = {
-  t0_spawn: 28.5,
-  t1_impact: 31.0,
-  t2_burst: 31.0,
-  t3_dissolve: 24.0, // City begins dissolving to ocean at flower touch
-  t4_universe: 34.0, // Fully dissolved before/during universe reveal
-  t5_settle: 36.5,
+  t0_spawn: 161.0,     // Ocean light trails ascend at 161.0s
+  t1_impact: 165.0,    // Climax impact at 165.0s (massive musical drop)
+  t2_burst: 165.0,     // Burst of radiant celestial sparkles
+  t3_dissolve: 55.0,   // City begins dissolving to aurora particles at 55.0s
+  t4_universe: 175.0,  // Deep cosmos & Solar System fully revealed at 175.0s
+  t5_settle: 178.0,    // Sparkle burst settles into background cosmos
 };
 
 export class ShootingStarUniverse {
@@ -484,9 +484,9 @@ export class ShootingStarUniverse {
       this.burstGroup.visible = false;
     }
 
-    // --- PHASE 3: CITY DISSOLVE (t3 -> t4) ---
+    // --- PHASE 3: CITY DISSOLVE (t3 -> t3 + 10s) ---
     if (relativeTime >= CINEMATIC_TIMELINE.t3_dissolve && this.cityGroupRef) {
-      const dissolveDuration = CINEMATIC_TIMELINE.t4_universe - CINEMATIC_TIMELINE.t3_dissolve;
+      const dissolveDuration = 10.0; // 55s to 65s
       const dissolveT = Math.max(0, Math.min(1, (relativeTime - CINEMATIC_TIMELINE.t3_dissolve) / dissolveDuration));
 
       // Ease city scale down to zero gracefully as if dissolving into stardust

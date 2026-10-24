@@ -4,6 +4,7 @@
  */
 
 import { World, Entity } from '@iwsdk/core';
+import { EXPERIENCE_CONFIG } from './ExperienceConfig.js';
 import { audioEngine } from '../audio/AudioEngine.js';
 import { audioAnalyzer } from '../audio/AudioAnalyzer.js';
 import { musicalConductor } from '../conductor/MusicalConductor.js';
@@ -300,8 +301,8 @@ export class ExperienceApp {
 
     this.uiContainer.innerHTML = `
       <div style="max-width: 480px; padding: 32px; background: rgba(255, 255, 255, 0.04); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(16px); box-shadow: 0 20px 50px rgba(0,0,0,0.5); text-align: center;">
-        <h1 style="font-size: 38px; font-weight: 300; letter-spacing: 6px; margin: 0 0 8px 0; color: #f0f4ff; text-transform: uppercase;">EXPERIENCE</h1>
-        <p style="font-size: 15px; font-weight: 400; letter-spacing: 2px; color: #a2b4e0; margin: 0 0 24px 0;">Ludovico Einaudi</p>
+        <h1 style="font-size: 38px; font-weight: 300; letter-spacing: 6px; margin: 0 0 8px 0; color: #f0f4ff; text-transform: uppercase;">A SKY FULL OF STARS</h1>
+        <p style="font-size: 15px; font-weight: 400; letter-spacing: 2px; color: #a2b4e0; margin: 0 0 24px 0;">Coldplay / The Hit Crew Kids</p>
 
         <div style="display: flex; flex-direction: column; gap: 12px; align-items: center; margin-bottom: 24px;">
           <button id="btn-enter" style="
@@ -381,7 +382,7 @@ export class ExperienceApp {
       <div style="max-width: 460px; padding: 32px; background: rgba(50, 10, 15, 0.7); border-radius: 20px; border: 1px solid rgba(255, 100, 100, 0.3); backdrop-filter: blur(16px);">
         <h2 style="font-size: 22px; font-weight: 500; color: #ff8888; margin: 0 0 12px 0;">Audio Asset Required</h2>
         <p style="font-size: 13px; color: #fdd; line-height: 1.5; margin: 0 0 20px 0;">${msg}</p>
-        <div style="font-size: 12px; color: #bbb;">Ensure <code>public/audio/experience.mp3</code> exists in the workspace.</div>
+        <div style="font-size: 12px; color: #bbb;">Ensure <code>${EXPERIENCE_CONFIG.audioPath}</code> exists in the workspace.</div>
       </div>
     `;
   }
@@ -404,7 +405,7 @@ export class ExperienceApp {
     this.debugOverlay.innerHTML = `
       <b>EXPERIENCE INTERACTION DEBUG [D]</b><br/>
       FPS: ${performanceMonitor.getFPS()} (${performanceMonitor.getFrameTimeMs().toFixed(1)}ms)<br/>
-      Audio time: ${audioEngine.currentTime.toFixed(2)}s / 278.00s | Rel: ${frameData.relativeTime.toFixed(2)}s (${(frameData.normalizedProgress * 100).toFixed(1)}%)<br/>
+      Audio time: ${audioEngine.currentTime.toFixed(2)}s / ${musicExcerpt.duration.toFixed(2)}s | Rel: ${frameData.relativeTime.toFixed(2)}s (${(frameData.normalizedProgress * 100).toFixed(1)}%)<br/>
       Cue: ${frameData.activeCue.id} (${frameData.activeCue.event}) | Phase: ${experienceState.phase}<br/>
       <hr style="border:0; border-top:1px solid #446; margin:4px 0;"/>
       <b>XR Session:</b> ${dbg.xrActive ? '<span style="color:#4f8;">ACTIVE</span>' : '<span style="color:#aaa;">NO</span>'} | Left: ${dbg.leftControllerDetected ? 'YES' : 'NO'} | Right: ${dbg.rightControllerDetected ? 'YES' : 'NO'}<br/>

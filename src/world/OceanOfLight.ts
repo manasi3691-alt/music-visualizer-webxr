@@ -38,10 +38,10 @@ export interface OceanTimelineConfig {
 }
 
 export const OCEAN_TIMELINE: OceanTimelineConfig = {
-  t_dissolve_start: 24.0,
-  t_dissolve_end: 27.5,
-  t_star_fire: 28.5,
-  t_universe: 31.0,
+  t_dissolve_start: 55.0, // City dissolves into cosmic ocean at 55.0s
+  t_dissolve_end: 65.0,   // Ocean fully formed by 65.0s
+  t_star_fire: 165.0,     // Ocean currents rise into sky at 165.0s
+  t_universe: 175.0,      // Universe & Solar System reveal at 175.0s
 };
 
 export class OceanOfLight {
@@ -77,8 +77,7 @@ export class OceanOfLight {
     }
 
     // 1. Ocean Surface Shader (Single PlaneGeometry 90m x 90m)
-    // Placed at y = 0.05m so wave crests (0.05m + 0.15m = 0.20m) cleanly submerge
-    // the floor platform (y=0) when dissolving
+    // Placed at y = 0.05m so wave crests cleanly submerge the floor platform
     const oceanGeo = new PlaneGeometry(90, 90, isQuest ? 32 : 48, isQuest ? 32 : 48);
     oceanGeo.rotateX(-Math.PI * 0.5);
 
@@ -86,12 +85,16 @@ export class OceanOfLight {
       uniforms: {
         uTime: { value: 0 },
         uAlpha: { value: 0 },
+        uBass: { value: 0 },
+        uMid: { value: 0 },
+        uOverall: { value: 0 },
         uDeepColor: { value: new Color(0x06182c) },    // Deep luminous teal-indigo
         uSurfaceColor: { value: new Color(0x1a6b8c) }, // Bioluminescent turquoise
         uFoamColor: { value: new Color(0x7df9ff) },    // Cyan crest foam
       },
       vertexShader: `
         uniform float uTime;
+        uniform float uBass;
         varying vec2 vUv;
         varying vec3 vWorldPos;
         varying float vElevation;
@@ -100,9 +103,10 @@ export class OceanOfLight {
           vUv = uv;
           vec3 pos = position;
 
-          // Multi-frequency sinusoidal procedural ocean waves
-          float wave1 = sin(pos.x * 0.28 + uTime * 1.6) * cos(pos.z * 0.24 + uTime * 1.2) * 0.16;
-          float wave2 = sin(pos.x * 0.65 - uTime * 2.2) * sin(pos.z * 0.55 + uTime * 1.8) * 0.08;
+          // Sinusoidal procedural ocean waves modulated smoothly by bass
+          float bassFactor = 1.0 + uBass * 1.5;
+          float wave1 = sin(pos.x * 0.28 + uTime * 1.6) * cos(pos.z * 0.24 + uTime * 1.2) * (0.16 * bassFactor);
+          float wave2 = sin(pos.x * 0.65 - uTime * 2.2) * sin(pos.z * 0.55 + uTime * 1.8) * (0.08 * bassFactor);
           float wave3 = sin((pos.x + pos.z) * 1.1 + uTime * 2.8) * 0.04;
 
           pos.y += wave1 + wave2 + wave3;
@@ -115,6 +119,8 @@ export class OceanOfLight {
       `,
       fragmentShader: `
         uniform float uAlpha;
+        uniform float uMid;
+        uniform float uOverall;
         uniform vec3 uDeepColor;
         uniform vec3 uSurfaceColor;
         uniform vec3 uFoamColor;
@@ -123,13 +129,13 @@ export class OceanOfLight {
         varying float vElevation;
 
         void main() {
-          // Normal/elevation color ramp
-          float h = clamp(vElevation * 3.0 + 0.35, 0.0, 1.0);
+          // Normal/elevation color ramp with music intensity modulation
+          float h = clamp(vElevation * 3.0 + 0.35 + uOverall * 0.2, 0.0, 1.0);
           vec3 col = mix(uDeepColor, uSurfaceColor, h);
 
-          // Add foam highlights on crests
+          // Add foam highlights on wave crests modulated by mid frequencies
           float foam = pow(clamp(vElevation * 4.2 + 0.1, 0.0, 1.0), 3.0);
-          col = mix(col, uFoamColor, foam * 0.7);
+          col = mix(col, uFoamColor, foam * (0.7 + uMid * 0.4));
 
           // Distance fog falloff
           float dist = length(vWorldPos.xz);
@@ -202,33 +208,49 @@ export class OceanOfLight {
     this.floatingLotuses.instanceMatrix.needsUpdate = true;
     this.group.add(this.floatingLotuses);
 
-    // 3. Ethereal Curtains of Light (3 soft curved planes)
-    for (let i = 0; i < 3; i++) {
-      const curtainGeo = new PlaneGeometry(16, 8, 12, 4);
+    // 3. Ethereal Curtains of Light: 6 Icelandic Aurora curtains wrapped 360° around the user
+    const auroraColors = [
+      new Color(0x38ef7d), // Luminous Northern cyan
+      new Color(0x00f2fe), // Deep Iceland turquoise
+      new Color(0x8a2387), // Ethereal Icelandic violet
+      new Color(0x247ba0), // Nordic royal blue
+      new Color(0x11998e), // Emerald glacier green
+      new Color(0xf6d365), // Subtle champagne gold highlight
+    ];
+
+    for (let i = 0; i < 6; i++) {
+      const curtainGeo = new PlaneGeometry(isQuest ? 14 : 18, 9, isQuest ? 10 : 16, 4);
       const curtainMat = new ShaderMaterial({
         uniforms: {
           uAlpha: { value: 0 },
           uTime: { value: 0 },
-          uColor: { value: new Color(0x52e5ff) },
+          uMid: { value: 0 },
+          uColor: { value: auroraColors[i] },
         },
         vertexShader: `
           uniform float uTime;
+          uniform float uMid;
           varying vec2 vUv;
           void main() {
             vUv = uv;
             vec3 pos = position;
-            pos.z += sin(pos.x * 0.35 + uTime * 1.1) * 0.8;
+            // Flowing curtain wave with mid-frequency harmonic modulation
+            float waveSpeed = 0.9 + uMid * 0.7;
+            pos.z += sin(pos.x * 0.35 + uTime * waveSpeed) * (0.8 + uMid * 0.5);
+            pos.y += cos(pos.x * 0.2 + uTime * 0.6) * 0.3;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
           }
         `,
         fragmentShader: `
           uniform float uAlpha;
+          uniform float uMid;
           uniform vec3 uColor;
           varying vec2 vUv;
           void main() {
             float fadeH = sin(vUv.x * 3.14159);
             float fadeV = sin(vUv.y * 3.14159);
-            gl_FragColor = vec4(uColor, uAlpha * fadeH * fadeV * 0.22);
+            float glow = 0.22 + uMid * 0.25;
+            gl_FragColor = vec4(uColor, uAlpha * fadeH * fadeV * glow);
           }
         `,
         transparent: true,
@@ -238,8 +260,15 @@ export class OceanOfLight {
       });
 
       const curtainMesh = new Mesh(curtainGeo, curtainMat);
-      curtainMesh.position.set((i - 1) * 9.0, 3.8, -14.0 - i * 3.5);
-      curtainMesh.rotation.y = (i - 1) * 0.25;
+      // Place ribbons in a wide 360° cylindrical arc around the seated user
+      const angle = (i / 6) * Math.PI * 2 + 0.3;
+      const radius = 13.0 + (i % 2) * 3.5;
+      curtainMesh.position.set(
+        Math.sin(angle) * radius,
+        4.2 + (i % 3) * 0.8,
+        Math.cos(angle) * radius
+      );
+      curtainMesh.rotation.y = angle + Math.PI * 0.5;
       this.lightCurtains.push(curtainMesh);
       this.group.add(curtainMesh);
     }
@@ -299,16 +328,16 @@ export class OceanOfLight {
 
     this.group.visible = true;
 
-    // 1. Dissolve fade-in (24.0s -> 27.5s)
+    // 1. Dissolve fade-in (55.0s -> 65.0s)
     if (relativeTime >= OCEAN_TIMELINE.t_dissolve_start && relativeTime <= OCEAN_TIMELINE.t_dissolve_end) {
       const prog = (relativeTime - OCEAN_TIMELINE.t_dissolve_start) / (OCEAN_TIMELINE.t_dissolve_end - OCEAN_TIMELINE.t_dissolve_start);
       this.oceanAlpha = Math.max(0, Math.min(1, prog));
-    } else if (relativeTime > OCEAN_TIMELINE.t_dissolve_end && relativeTime < OCEAN_TIMELINE.t_universe) {
+    } else if (relativeTime > OCEAN_TIMELINE.t_dissolve_end && relativeTime < OCEAN_TIMELINE.t_star_fire) {
       this.oceanAlpha = 1.0;
     }
-    // Fade out as universe reveals at 31.0s - 34.0s
-    else if (relativeTime >= OCEAN_TIMELINE.t_universe) {
-      const prog = Math.min(1.0, (relativeTime - OCEAN_TIMELINE.t_universe) / 3.0);
+    // Ocean currents stretch upward into sky trails and dissolve into cosmic stars at 165.0s - 175.0s
+    else if (relativeTime >= OCEAN_TIMELINE.t_star_fire) {
+      const prog = Math.min(1.0, (relativeTime - OCEAN_TIMELINE.t_star_fire) / (OCEAN_TIMELINE.t_universe - OCEAN_TIMELINE.t_star_fire));
       this.oceanAlpha = Math.max(0, 1.0 - prog);
       if (this.oceanAlpha <= 0.01) {
         this.group.visible = false;
@@ -316,9 +345,17 @@ export class OceanOfLight {
       }
     }
 
-    // Update material uniforms
+    const bass = metrics?.low ?? 0;
+    const mid = metrics?.mid ?? 0;
+    const high = metrics?.high ?? 0;
+    const overall = metrics?.overall ?? 0;
+
+    // Update material uniforms with real audio metrics
     this.oceanMaterial.uniforms.uTime.value = relativeTime;
     this.oceanMaterial.uniforms.uAlpha.value = this.oceanAlpha;
+    this.oceanMaterial.uniforms.uBass.value = bass;
+    this.oceanMaterial.uniforms.uMid.value = mid;
+    this.oceanMaterial.uniforms.uOverall.value = overall;
 
     (this.floatingLotuses.material as ShaderMaterial).uniforms.uAlpha.value = this.oceanAlpha;
 
@@ -326,16 +363,18 @@ export class OceanOfLight {
       const mat = this.lightCurtains[i].material as ShaderMaterial;
       mat.uniforms.uAlpha.value = this.oceanAlpha;
       mat.uniforms.uTime.value = relativeTime;
+      mat.uniforms.uMid.value = mid;
     }
 
-    // Spray particles animation
+    // Spray particles animation modulated by high frequencies
     const sprayMat = this.sprayPoints.material as PointsMaterial;
-    sprayMat.opacity = this.oceanAlpha * 0.7;
+    sprayMat.opacity = this.oceanAlpha * (0.6 + high * 0.4);
 
+    const speedBoost = 1.0 + high * 0.8;
     for (let i = 0; i < this.maxSprayCount; i++) {
       const i3 = i * 3;
-      this.sprayPositions[i3 + 1] += this.sprayVelocities[i3 + 1] * deltaSec;
-      if (this.sprayPositions[i3 + 1] > 1.2) {
+      this.sprayPositions[i3 + 1] += this.sprayVelocities[i3 + 1] * deltaSec * speedBoost;
+      if (this.sprayPositions[i3 + 1] > 1.4) {
         this.sprayPositions[i3 + 1] = 0.08;
       }
     }
