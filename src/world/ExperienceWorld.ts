@@ -184,14 +184,16 @@ export class ExperienceWorld {
     this.soundBubbles.update(frameData, metrics, deltaSec);
 
     // 7. Climax event: Shooting star & Universe transition
-    this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, world, camera);
+    this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, metrics, world, camera);
 
     // 8. Interactive 3D Solar System (reveals after universe transition)
-    this.solarSystem.update(deltaSec, frameData.relativeTime, world, camera);
+    this.solarSystem.update(deltaSec, frameData.relativeTime, metrics, world, camera);
   }
 
   reset(): void {
     this.citySystem.reset();
+    this.structures.reset();
+    this.organicForms.reset();
     this.glowingFlower.reset();
     this.oceanOfLight.reset();
     this.shootingStarUniverse.reset();

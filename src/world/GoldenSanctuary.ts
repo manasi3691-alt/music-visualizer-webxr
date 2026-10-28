@@ -53,26 +53,46 @@ export class GoldenSanctuary {
   }
 
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
-    const { low, mid, high } = metrics;
-    // Bass drives slight sway/movement
-    const sway = low * 0.05 * Math.sin(frameData.relativeTime * 1.5);
-    // Mids drive illumination intensity
-    const illum = 0.1 + mid * 0.4;
-    // Highs drive strand flicker
-    const strandGlow = high * 0.6;
+    const relTime = frameData.relativeTime;
+
+    if (relTime >= 65.0) {
+      if (this.group.visible) {
+        this.group.visible = false;
+      }
+      return;
+    }
+    this.group.visible = true;
+
+    // Phase 1 emergence (0s - 18s) and dissolve (55s - 65s)
+    const emerge = Math.min(1.0, relTime / 18.0);
+    const dissolve = relTime >= 55.0 ? Math.max(0, 1.0 - (relTime - 55.0) / 10.0) : 1.0;
+    const targetAlpha = emerge * dissolve * 0.75;
+
+    const { low, mid, high, energy } = metrics;
+    // Bass drives gentle organic sway
+    const sway = low * 0.04 * Math.sin(frameData.relativeTime * 1.5);
+    // Mids and energy drive warm gold illumination
+    const illum = 0.15 + mid * 0.35 + energy * 0.25;
+    // Highs drive subtle strand radiance
+    const strandGlow = high * 0.5 + energy * 0.2;
 
     for (const t of this.towers) {
       t.mesh.position.y = 0.5 + sway;
-      t.mat.emissiveIntensity = Math.min(1.0, illum);
+      t.mat.opacity = targetAlpha;
+      t.mat.emissiveIntensity = Math.min(1.0, illum * dissolve);
     }
-    this.strandMaterial.emissiveIntensity = Math.min(1.0, strandGlow);
+    this.strandMaterial.opacity = targetAlpha;
+    this.strandMaterial.emissiveIntensity = Math.min(1.0, strandGlow * dissolve);
   }
 
   reset(): void {
+    this.group.visible = true;
     for (const t of this.towers) {
       t.mesh.position.y = 0.5;
+      t.mat.opacity = 0.0;
       t.mat.emissiveIntensity = 0.0;
     }
+    this.strandMaterial.opacity = 0.0;
     this.strandMaterial.emissiveIntensity = 0.0;
   }
 

@@ -218,34 +218,43 @@ export class ImmersiveArchitecture {
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
     const norm = frameData.normalizedProgress;
     const { low, mid, high } = metrics;
+    const relTime = frameData.relativeTime;
 
-    // Per-ring emergence thresholds mapped to 0–1 normalized progress
-    // Ring 0 starts at norm=0, ring 4 starts at norm=0.55
+    // Phase 1 (0s to 55s) emergence across the 5 rings
+    // Ring starts: 0s, 8s, 18s, 30s, 42s; window: 8-10s
+    const ringStarts = [0.0, 8.0, 18.0, 30.0, 42.0];
+    const ringWindow = 9.0;
+
+    // Dissolve starts at 55.0s and finishes at 65.0s
+    if (relTime >= 65.0) {
+      if (this.group.visible) {
+        this.group.visible = false;
+      }
+      return;
+    }
+    this.group.visible = true;
+
+    const dissolve = relTime >= 55.0 ? Math.max(0, 1.0 - (relTime - 55.0) / 10.0) : 1.0;
+
     for (let i = 0; i < this.buildings.length; i++) {
       const b = this.buildings[i];
-      const ringStart  = this.RING_EMERGE_START[b.ringIndex];
-      const ringWindow = this.RING_EMERGE_WINDOW;
-
-      // Visibility progress for this ring [0, 1]
-      const ringVis = Math.max(0, Math.min(1, (norm - ringStart) / ringWindow));
-
-      // Dissolve starts at 91% for all rings (release phase at 165/180 = 0.917)
-      const dissolve = norm >= 0.91 ? Math.max(0, (1.0 - norm) / 0.09) : 1.0;
-
+      const rStart = ringStarts[b.ringIndex] ?? 0;
+      const ringVis = Math.max(0, Math.min(1, (relTime - rStart) / ringWindow));
       const targetVis = ringVis * dissolve;
 
       if (targetVis < 0.001) {
-        // Keep hidden, skip update
         if (b.mat.opacity > 0) b.mat.opacity = 0;
+        b.mesh.visible = false;
         continue;
       }
+      b.mesh.visible = true;
 
       // Material opacity fades in
       b.mat.opacity = Math.min(0.88, targetVis * 0.92);
 
       // Height growth: smoothly animate toward targetScaleY * ringVis
       // Bass drives extra height surge during music
-      const bassBoost = 1.0 + low * 0.25 * Math.min(1, norm * 3);
+      const bassBoost = 1.0 + low * 0.28;
       const heightTarget = b.targetScaleY * ringVis * bassBoost;
       const growSpeed = 2.0; // units per second
       if (b.currentScaleY < heightTarget) {
@@ -286,6 +295,7 @@ export class ImmersiveArchitecture {
   }
 
   reset(): void {
+    this.group.visible = true;
     for (let i = 0; i < this.buildings.length; i++) {
       const b = this.buildings[i];
       b.currentScaleY = 0.001;

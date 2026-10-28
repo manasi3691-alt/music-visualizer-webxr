@@ -22,6 +22,8 @@ import {
   BufferGeometry,
   Float32BufferAttribute,
   LineBasicMaterial,
+  Points,
+  PointsMaterial,
   Vector3,
   Quaternion,
   Matrix4,
@@ -32,6 +34,7 @@ import {
   AdditiveBlending,
   MathUtils,
 } from '@iwsdk/core';
+import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
 export type PlanetOwnership = 'Orbital' | 'UserOwned' | 'Released';
 
@@ -45,6 +48,7 @@ export interface PlanetDefinition {
   orbitRadius: number;      // Distance from Sun center in meters
   orbitSpeed: number;       // Radians per second
   initialAngle: number;     // Starting orbital angle in radians
+  revealTime: number;       // Gradual reveal timestamp in seconds
   hasAtmosphere?: boolean;
   atmosphereColor?: number;
   hasRings?: boolean;
@@ -86,6 +90,7 @@ export class SolarSystem {
 
   private planetRegistry: Map<string, PlanetBody> = new Map();
   private orbitLineMesh: LineSegments | null = null;
+  private stardustPoints!: Points;
 
   // Seated arc anchor (computed at transition time using XR camera world matrix)
   private anchorPosition: Vector3 = new Vector3(0, 1.25, -2.4);
@@ -130,8 +135,37 @@ export class SolarSystem {
     // 4. Build Subtle Orbit Paths
     this.buildOrbitPaths();
 
+    // 5. Build Ambient Stardust Halo
+    this.buildStardust();
+
     // Start hidden
     this.group.visible = false;
+  }
+
+  private buildStardust(): void {
+    const count = this.isQuest ? 120 : 260;
+    const geo = new BufferGeometry();
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+      const angle = Math.random() * Math.PI * 2;
+      const rad = 0.6 + Math.random() * 2.8;
+      const y = (Math.random() - 0.5) * 0.9;
+      pos[i3] = Math.cos(angle) * rad;
+      pos[i3 + 1] = y;
+      pos[i3 + 2] = Math.sin(angle) * rad;
+    }
+    geo.setAttribute('position', new Float32BufferAttribute(pos, 3));
+    const mat = new PointsMaterial({
+      size: this.isQuest ? 0.025 : 0.035,
+      color: 0xfff0c2,
+      blending: AdditiveBlending,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+    });
+    this.stardustPoints = new Points(geo, mat);
+    this.group.add(this.stardustPoints);
   }
 
   private buildSun(): void {
@@ -184,6 +218,7 @@ export class SolarSystem {
         orbitRadius: 0.58,
         orbitSpeed: 0.52,
         initialAngle: 0.25,
+        revealTime: 176.0,
       },
       {
         id: 'venus',
@@ -194,6 +229,7 @@ export class SolarSystem {
         orbitRadius: 0.78,
         orbitSpeed: 0.40,
         initialAngle: 1.1,
+        revealTime: 177.0,
         hasAtmosphere: true,
         atmosphereColor: 0xffd180,
       },
@@ -206,6 +242,7 @@ export class SolarSystem {
         orbitRadius: 1.05,
         orbitSpeed: 0.32,
         initialAngle: 2.1,
+        revealTime: 178.0,
         hasAtmosphere: true,
         atmosphereColor: 0x66ccff,
       },
@@ -218,6 +255,7 @@ export class SolarSystem {
         orbitRadius: 1.32,
         orbitSpeed: 0.26,
         initialAngle: 3.2,
+        revealTime: 179.0,
       },
       {
         id: 'jupiter',
@@ -228,6 +266,7 @@ export class SolarSystem {
         orbitRadius: 1.72,
         orbitSpeed: 0.16,
         initialAngle: 4.0,
+        revealTime: 180.2,
       },
       {
         id: 'saturn',
@@ -238,6 +277,7 @@ export class SolarSystem {
         orbitRadius: 2.15,
         orbitSpeed: 0.12,
         initialAngle: 4.8,
+        revealTime: 181.5,
         hasRings: true,
         ringInner: 0.18,
         ringOuter: 0.36,
@@ -252,6 +292,7 @@ export class SolarSystem {
         orbitRadius: 2.55,
         orbitSpeed: 0.09,
         initialAngle: 5.6,
+        revealTime: 182.5,
         hasAtmosphere: true,
         atmosphereColor: 0x99ffff,
       },
@@ -264,6 +305,7 @@ export class SolarSystem {
         orbitRadius: 2.92,
         orbitSpeed: 0.07,
         initialAngle: 0.7,
+        revealTime: 182.8,
         hasAtmosphere: true,
         atmosphereColor: 0x4d79ff,
       },
@@ -445,44 +487,87 @@ export class SolarSystem {
   }
 
   /**
-   * Main update driven by existing audio clock.
+   * Main update driven by existing audio clock and real-time audio metrics.
    */
-  update(deltaSec: number, relativeTime: number, world?: World, camera?: Camera): void {
+  update(deltaSec: number, relativeTime: number, metrics?: AudioMetrics, world?: World, camera?: Camera): void {
     // Reveal solar system at Phase 3 (175.0s, following dedicated 55s-165s lotus/ocean and cosmic ascent)
     const REVEAL_START = 175.0;
-    const REVEAL_END = 178.5;
 
-    if (relativeTime >= REVEAL_START && !this.isRevealed) {
+    if (relativeTime < REVEAL_START) {
+      if (this.group.visible) {
+        this.group.visible = false;
+      }
+      return;
+    }
+
+    if (!this.isRevealed) {
       this.isRevealed = true;
       this.group.visible = true;
       this.anchorToSeatedUser(world, camera);
-      console.log(`[SolarSystem] Revealed at relative time ${relativeTime.toFixed(2)}s`);
+      console.log(`[SolarSystem] Phase 3 revealed at relative time ${relativeTime.toFixed(2)}s`);
     }
 
-    if (!this.group.visible) return;
+    const low = metrics?.low ?? 0;
+    const mid = metrics?.mid ?? 0;
+    const high = metrics?.high ?? 0;
+    const energy = metrics?.energy ?? 0;
+    const beat = metrics?.beat ?? 0;
 
-    // Smooth entry scale & opacity animation
-    if (this.revealProgress < 1.0) {
-      this.revealProgress = Math.min(1.0, (relativeTime - REVEAL_START) / (REVEAL_END - REVEAL_START));
-      const eased = Math.sin(this.revealProgress * Math.PI * 0.5);
-      this.group.scale.set(eased, eased, eased);
+    // 1. Sun ignition and gradual appearance (175.0s -> 176.0s)
+    const sunRevealT = Math.max(0, Math.min(1, (relativeTime - REVEAL_START) / 1.0));
+    const sunEased = Math.sin(sunRevealT * Math.PI * 0.5);
+    // Sun breathes subtly with bass heartbeat and energy
+    const sunPulse = (1.0 + low * 0.16 + energy * 0.10 + beat * 0.08) * sunEased;
+    this.sunGroup.scale.set(sunPulse, sunPulse, sunPulse);
+
+    // Sun coronas respond to music
+    this.sunGlowMesh.rotation.y += deltaSec * (0.25 + energy * 0.25);
+    this.sunLightMesh.rotation.z += deltaSec * (0.12 + energy * 0.15);
+    (this.sunGlowMesh.material as MeshBasicMaterial).opacity = (0.50 + low * 0.35) * sunEased;
+    (this.sunLightMesh.material as MeshBasicMaterial).opacity = (0.25 + energy * 0.35) * sunEased;
+
+    // 2. Subtle orbit line responsiveness
+    if (this.orbitLineMesh) {
+      (this.orbitLineMesh.material as LineBasicMaterial).opacity = (0.18 + (metrics?.overall ?? 0) * 0.24) * sunEased;
     }
 
-    // Rotate Sun coronas gently
-    this.sunGlowMesh.rotation.y += deltaSec * 0.25;
-    this.sunLightMesh.rotation.z += deltaSec * 0.12;
+    // 3. Stardust particles twinkle with high frequencies
+    if (this.stardustPoints) {
+      this.stardustPoints.rotation.y += deltaSec * (0.04 + energy * 0.06);
+      (this.stardustPoints.material as PointsMaterial).opacity = (0.28 + high * 0.55) * sunEased;
+    }
 
-    // Update Planetary Orbits
+    // 4. Update Planetary Orbits and Gradual Reveal
+    // Musical build-ups feel expansive and energetic, quiet passages feel calm,
+    // and the outro (250s+) settles into tranquil serene orbits
+    let outroFactor = 1.0;
+    if (relativeTime >= 250.0) {
+      const releaseProg = Math.min(1.0, (relativeTime - 250.0) / 16.0);
+      outroFactor = Math.max(0.45, 1.0 - releaseProg * 0.55);
+    }
+    const speedMult = (0.65 + energy * 0.60 + beat * 0.10) * outroFactor;
+
     for (const [, planet] of this.planetRegistry) {
+      // Gradual sequential planet reveal ( Mercury at 176s -> Neptune at 182.8s )
+      const planetRevealT = Math.max(0, Math.min(1, (relativeTime - planet.definition.revealTime) / 1.2));
+      const planetEased = Math.sin(planetRevealT * Math.PI * 0.5);
+      planet.group.scale.set(planetEased, planetEased, planetEased);
+
+      // Emissive and atmospheric glow respond smoothly to mid frequencies and section energy
+      const planetGlow = 0.30 + mid * 0.45 + energy * 0.35;
+      planet.originalMaterial.emissiveIntensity = planetGlow * outroFactor;
+      if (planet.atmosphereMesh) {
+        (planet.atmosphereMesh.material as MeshBasicMaterial).opacity = (0.18 + mid * 0.35 + energy * 0.20) * planetEased * outroFactor;
+      }
+
       // If planet is currently held by user or released to custom position, do NOT move it along orbit
       if (planet.ownership === 'UserOwned' || planet.ownership === 'Released') {
-        // Still gently spin planet on its own axis
         planet.mesh.rotation.y += deltaSec * 0.6;
         continue;
       }
 
       // Orbital motion
-      planet.currentAngle += planet.definition.orbitSpeed * deltaSec;
+      planet.currentAngle += planet.definition.orbitSpeed * speedMult * deltaSec;
       const r = planet.definition.orbitRadius;
       planet.group.position.x = Math.cos(planet.currentAngle) * r;
       planet.group.position.z = Math.sin(planet.currentAngle) * r;

@@ -435,7 +435,9 @@ export class CityBuilding {
   ): void {
     // 1. Advance construction animation if currently building
     if (this.isAnimatingConstruction) {
-      this.constructionProgress += deltaSec / CONSTRUCTION_ANIMATION_DURATION;
+      // Construction speed subtly accelerates on musical energy while staying smooth
+      const speedMod = 1.0 + (metrics?.energy ?? 0) * 0.35 + (metrics?.beat ?? 0) * 0.15;
+      this.constructionProgress += (deltaSec / CONSTRUCTION_ANIMATION_DURATION) * speedMod;
       if (this.constructionProgress >= 1.0) {
         this.constructionProgress = 1.0;
         this.isAnimatingConstruction = false;
@@ -451,21 +453,35 @@ export class CityBuilding {
 
     this.group.visible = true;
 
-    // 2. Subtle FFT breathing (Section 19: 1-3% gentle scale, window brightness)
-    // Low frequency drives microscopic scale breathing
-    const scaleBreath = 1.0 + metrics.low * 0.025;
+    const low = metrics?.low ?? 0;
+    const mid = metrics?.mid ?? 0;
+    const high = metrics?.high ?? 0;
+    const energy = metrics?.energy ?? 0;
+    const beat = metrics?.beat ?? 0;
+
+    // 2. Subtle organic breathing (bass frequencies gently swell building volume)
+    const scaleBreath = 1.0 + low * 0.024 + energy * 0.012;
     const finalScale = this.baseScale * scaleBreath;
     this.group.scale.set(finalScale, finalScale, finalScale);
 
-    // Mid/high frequencies modulate luminous windows & light strips
-    const windowPulse = 1.0 + metrics.mid * 0.15 + metrics.high * 0.1;
+    // 3. Musical building illumination:
+    // Mid frequencies (piano chords & vocals) + section energy warmly illuminate windows
+    // Calmed quiet passages, expansive and radiant during build-ups, free of jitter or flashing
+    const windowGlow = 0.60 + mid * 0.45 + energy * 0.55 + beat * 0.08;
     for (let i = 0; i < this.windowMaterials.length; i++) {
-      this.windowMaterials[i].emissiveIntensity = 1.2 * windowPulse;
+      this.windowMaterials[i].emissiveIntensity = 1.05 * windowGlow;
     }
 
-    // Adapt body emissive to current conductor accent color
+    // 4. Architectural edge outlines shimmer smoothly with high frequencies and treble harmonics
+    const edgeOpacity = Math.min(0.95, 0.40 + high * 0.35 + energy * 0.30);
+    for (let i = 0; i < this.edgeMaterials.length; i++) {
+      this.edgeMaterials[i].opacity = edgeOpacity;
+    }
+
+    // 5. Adapt body glass emissive to current conductor accent color with musical breathing
     const accent = frameData.interpolatedColor.primaryAccent;
-    this.scratchEmissive.setRGB(accent[0] * 0.2, accent[1] * 0.2, accent[2] * 0.2);
+    const bodyGlow = (0.15 + energy * 0.20 + mid * 0.15);
+    this.scratchEmissive.setRGB(accent[0] * bodyGlow, accent[1] * bodyGlow, accent[2] * bodyGlow);
     for (let i = 0; i < this.bodyMaterials.length; i++) {
       this.bodyMaterials[i].emissive.copy(this.scratchEmissive);
     }

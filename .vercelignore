@@ -1,2 +1,9 @@
 cloudflared.exe
 .git
+Audio /
+dist
+node_modules
+.agents
+.claude
+.cursor
+.iwsdk

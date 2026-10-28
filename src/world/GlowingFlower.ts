@@ -56,6 +56,7 @@ export class GlowingFlower {
   // Visual meshes
   readonly flowerRoot: Group = new Group();
   private petals: Mesh[] = [];
+  private petalBaseTilts: number[] = [];
   private petalMaterials: ShaderMaterial[] = [];
   private debugMaterials: MeshNormalMaterial[] = [];
   private centerCore: Mesh;
@@ -300,14 +301,16 @@ export class GlowingFlower {
               float tip = vUv.y;
               float edge = abs(vUv.x - 0.5) * 2.0;
 
-              // Soft luminous vein texture boosted by high frequencies and touch
-              float vein = sin(vUv.x * 16.0 + vUv.y * 8.0 + uTime * 1.2) * 0.5 + 0.5;
-              float veinPower = 0.16 + uHigh * 0.28 + uTouchGlow * 0.55;
+              // Detailed crystalline branched veins dynamically illuminated by high frequencies and touch
+              float vein1 = sin(vUv.x * 24.0 + vUv.y * 12.0 + uTime * 1.5) * 0.5 + 0.5;
+              float vein2 = cos(vUv.x * 14.0 - vUv.y * 22.0 + uTime * 0.9) * 0.5 + 0.5;
+              float crystalVeins = pow(vein1 * vein2, 1.6) * 2.2;
+              float veinPower = 0.20 + uHigh * 0.55 + uTouchGlow * 0.60;
 
               vec3 col = mix(uBaseColor, uEdgeColor, edge * 0.65);
               // Pink/magenta flush toward upper petal edges and tip
               col = mix(col, uHighlightColor, pow(tip, 1.6) * 0.75);
-              col += vec3(0.7, 0.95, 1.0) * pow(vein, 4.0) * veinPower;
+              col += vec3(0.75, 0.95, 1.0) * crystalVeins * veinPower;
 
               // Touch glow radiance boost
               col += vec3(0.3, 0.8, 1.0) * uTouchGlow * 0.65;
@@ -339,6 +342,7 @@ export class GlowingFlower {
         petalMesh.rotation.x = tier.tilt;
 
         this.petals.push(petalMesh);
+        this.petalBaseTilts.push(tier.tilt);
         this.petalMaterials.push(petalMat);
         this.flowerRoot.add(petalMesh);
       }
@@ -468,30 +472,42 @@ export class GlowingFlower {
       this.trailPoints.visible = false;
     }
     // 3. Cosmic Ascent Transition: Dissolving gracefully into star streams (165s -> 175s)
-    else if (relativeTime > FLOWER_TIMELINE.t_touch_window_end) {
-      if (this.reactionProgress < 1.0) {
-        this.reactionProgress = Math.min(1.0, this.reactionProgress + deltaSec * 0.12);
-        // Expand and softly dissolve as ocean currents rise into stars
-        const scale = 1.0 + this.reactionProgress * 1.5;
-        const alpha = Math.max(0, 1.0 - this.reactionProgress);
-        this.flowerRoot.scale.set(scale, scale, scale);
-        for (let i = 0; i < this.petalMaterials.length; i++) {
-          this.petalMaterials[i].uniforms.uOpacity.value = alpha * 0.88;
-        }
-        if (alpha <= 0.01) {
-          this.group.visible = false;
-        }
+    else if (relativeTime > FLOWER_TIMELINE.t_touch_window_end && relativeTime < 175.0) {
+      this.group.visible = true;
+      const dissolveProgress = Math.max(0, Math.min(1, (relativeTime - FLOWER_TIMELINE.t_touch_window_end) / 10.0));
+      // Smoothstep easing for petal expansion and stardust dispersal
+      const ease = dissolveProgress * dissolveProgress * (3.0 - 2.0 * dissolveProgress);
+      const scale = 1.0 + ease * 1.2;
+      const alpha = Math.max(0, 1.0 - ease);
+      this.flowerRoot.scale.set(scale, scale, scale);
+      for (let i = 0; i < this.petalMaterials.length; i++) {
+        this.petalMaterials[i].uniforms.uOpacity.value = alpha * 0.88;
+      }
+      if (alpha <= 0.01) {
+        this.group.visible = false;
       }
     } else {
       this.group.visible = false;
     }
 
-    // Gentle FFT breathing modulation on petals
+    // Gentle FFT breathing modulation on petals + unfolding bloom angle
     const energy = metrics ? metrics.overall : 0;
+    const mid = metrics ? metrics.mid : 0;
     const high = metrics ? metrics.high : 0;
     const breathe = 1.0 + Math.sin(relativeTime * 2.2) * 0.02 + energy * 0.04 + this.touchGlow * 0.06;
+
+    // Transition 1 unfolding bloom progress (58.0s -> 65.0s)
+    let bloomProgress = 1.0;
+    if (relativeTime < FLOWER_TIMELINE.t_arrival) {
+      const bT = Math.max(0, Math.min(1, (relativeTime - FLOWER_TIMELINE.t_spawn) / (FLOWER_TIMELINE.t_arrival - FLOWER_TIMELINE.t_spawn)));
+      bloomProgress = 0.12 + Math.pow(bT, 2.0) * 0.88;
+    }
+
     for (let i = 0; i < this.petals.length; i++) {
       this.petals[i].scale.set(breathe, breathe, breathe);
+      // Unfold petals from closed bud to full bloom, plus subtle mid-frequency breathing
+      const baseTilt = this.petalBaseTilts[i] ?? 0.4;
+      this.petals[i].rotation.x = baseTilt * bloomProgress * (1.0 + mid * 0.06);
     }
 
     // Update material time, high frequency vein boost, and touch radiance

@@ -165,8 +165,21 @@ export class SoundBubbles {
    * Main update — called every frame. Zero heap allocations.
    */
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
-    const norm = frameData.normalizedProgress;
     const t = frameData.relativeTime;
+
+    // Sound bubbles belong strictly to Phase 2 (58s -> 165s) and dissolve during transition 2 (165s -> 175s)
+    if (t < 58.0 || t >= 175.0) {
+      if (this.group.visible) {
+        this.group.visible = false;
+      }
+      return;
+    }
+    this.group.visible = true;
+
+    // Emergence progress during 58s - 66s
+    const emergeProgress = Math.min(1.0, Math.max(0, (t - 58.0) / 8.0));
+    // Dissolution into ascending star streams during 165s - 175s
+    const dissolve = t >= 165.0 ? Math.max(0, 1.0 - (t - 165.0) / 10.0) : 1.0;
 
     // Determine XR poking point (right hand index tip or right grip)
     let pokerPos: Vector3 | null = null;
@@ -186,20 +199,22 @@ export class SoundBubbles {
       }
     }
 
+    const { mid, high, energy } = metrics;
+
     for (let i = 0; i < this.bubbles.length; i++) {
       const b = this.bubbles[i];
 
       // Cooldown tick
       if (b.popCooldown > 0) b.popCooldown -= deltaSec;
 
-      // Emergence check
-      const targetOpacity = norm >= b.emergeAt && norm < 0.95
-        ? Math.min(0.55, (norm - b.emergeAt) / 0.08 * 0.55)
-        : 0;
+      // Smooth emergence and dissolution opacity
+      const vis = emergeProgress * dissolve;
+      const targetOpacity = vis * 0.55;
 
       if (!b.isPopping) {
-        // Float animation
-        const floatY = Math.sin(t * b.floatSpeed + b.floatPhase) * b.floatAmplitude;
+        // Float animation — during ascent transition (165-175s), currents lift bubbles upward
+        const liftBonus = t >= 165.0 ? (t - 165.0) * 0.45 : 0;
+        const floatY = Math.sin(t * b.floatSpeed + b.floatPhase) * b.floatAmplitude + liftBonus;
         const floatX = Math.cos(t * b.floatSpeed * 0.7 + b.floatPhase + 1.2) * b.floatAmplitude * 0.3;
 
         b.mesh.position.x = b.restPos.x + floatX;
@@ -207,16 +222,15 @@ export class SoundBubbles {
         b.mesh.position.z = b.restPos.z;
 
         // Scale
-        const vis = Math.max(0, Math.min(1, (norm - b.emergeAt) / 0.08));
         const currentScale = b.baseScale * vis;
         b.mesh.scale.setScalar(Math.max(0.001, currentScale));
         b.mat.opacity = targetOpacity;
 
-        // Subtle emissive pulse with mid frequencies
-        b.mat.emissiveIntensity = 0.05 + metrics.mid * 0.15;
+        // Subtle emissive pulse with mid and high frequencies (shimmering iridescence)
+        b.mat.emissiveIntensity = (0.06 + mid * 0.20 + high * 0.20 + energy * 0.10) * dissolve;
 
         // XR proximity pop check
-        if (pokerPos && b.popCooldown <= 0 && vis > 0.5) {
+        if (pokerPos && b.popCooldown <= 0 && vis > 0.4) {
           b.mesh.updateMatrixWorld();
           this.scratchBubbleWorldPos.setFromMatrixPosition(b.mesh.matrixWorld);
           const dist = pokerPos.distanceTo(this.scratchBubbleWorldPos);
@@ -233,7 +247,6 @@ export class SoundBubbles {
           b.isPopping = false;
           b.popProgress = 0;
           b.popCooldown = POP_COOLDOWN;
-          const vis = Math.max(0, Math.min(1, (norm - b.emergeAt) / 0.08));
           b.mesh.scale.setScalar(Math.max(0.001, b.baseScale * vis));
           b.mat.opacity = targetOpacity;
         } else {
@@ -263,6 +276,7 @@ export class SoundBubbles {
    * Hit-test for desktop clicks or ray-based popping. Zero heap allocations.
    */
   hitTest(rayOrigin: Vector3, rayDir: Vector3): boolean {
+    if (!this.group.visible) return false;
     for (let i = 0; i < this.bubbles.length; i++) {
       const b = this.bubbles[i];
       if (b.popCooldown <= 0 && b.mesh.scale.x > 0.02 && !b.isPopping) {
@@ -335,6 +349,7 @@ export class SoundBubbles {
   }
 
   reset(): void {
+    this.group.visible = false;
     for (const b of this.bubbles) {
       b.isPopping = false;
       b.popProgress = 0;

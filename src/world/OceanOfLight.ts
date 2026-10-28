@@ -63,6 +63,8 @@ export class OceanOfLight {
   private sprayVelocities: Float32Array;
   private readonly maxSprayCount: number;
 
+  private transitionRibbons: Mesh[] = [];
+  private ascendingStreamers: Mesh[] = [];
   private oceanAlpha = 0; // 0 to 1
   private scratchMat4 = new Matrix4();
   private scratchPos = new Vector3();
@@ -87,7 +89,9 @@ export class OceanOfLight {
         uAlpha: { value: 0 },
         uBass: { value: 0 },
         uMid: { value: 0 },
+        uHigh: { value: 0 },
         uOverall: { value: 0 },
+        uLift: { value: 0 }, // Upward current lift during 161s - 165s
         uDeepColor: { value: new Color(0x06182c) },    // Deep luminous teal-indigo
         uSurfaceColor: { value: new Color(0x1a6b8c) }, // Bioluminescent turquoise
         uFoamColor: { value: new Color(0x7df9ff) },    // Cyan crest foam
@@ -95,6 +99,7 @@ export class OceanOfLight {
       vertexShader: `
         uniform float uTime;
         uniform float uBass;
+        uniform float uLift;
         varying vec2 vUv;
         varying vec3 vWorldPos;
         varying float vElevation;
@@ -103,13 +108,19 @@ export class OceanOfLight {
           vUv = uv;
           vec3 pos = position;
 
-          // Sinusoidal procedural ocean waves modulated smoothly by bass
-          float bassFactor = 1.0 + uBass * 1.5;
-          float wave1 = sin(pos.x * 0.28 + uTime * 1.6) * cos(pos.z * 0.24 + uTime * 1.2) * (0.16 * bassFactor);
-          float wave2 = sin(pos.x * 0.65 - uTime * 2.2) * sin(pos.z * 0.55 + uTime * 1.8) * (0.08 * bassFactor);
-          float wave3 = sin((pos.x + pos.z) * 1.1 + uTime * 2.8) * 0.04;
+          // Bass frequencies visibly displace ocean wave amplitude and speed
+          float waveSpeed = uTime * (1.2 + uBass * 1.8);
+          float bassAmp = 0.18 + uBass * 0.38;
 
-          pos.y += wave1 + wave2 + wave3;
+          float wave1 = sin(pos.x * 0.25 + waveSpeed * 1.3) * cos(pos.z * 0.22 + waveSpeed * 0.9) * bassAmp;
+          float wave2 = sin(pos.x * 0.58 - waveSpeed * 1.7) * sin(pos.z * 0.48 + waveSpeed * 1.4) * (bassAmp * 0.55);
+          float wave3 = sin((pos.x * 0.9 + pos.z * 0.8) + waveSpeed * 2.1) * (0.05 + uBass * 0.08);
+
+          // Transition 2: Ascending currents lift upward toward the sky (161s - 165s)
+          float distCenter = length(pos.xz);
+          float liftWave = uLift * sin(distCenter * 0.35 - uTime * 2.8) * (3.8 * exp(-distCenter * 0.07));
+
+          pos.y += wave1 + wave2 + wave3 + liftWave;
           vElevation = pos.y;
 
           vec4 worldPos = modelMatrix * vec4(pos, 1.0);
@@ -120,6 +131,7 @@ export class OceanOfLight {
       fragmentShader: `
         uniform float uAlpha;
         uniform float uMid;
+        uniform float uHigh;
         uniform float uOverall;
         uniform vec3 uDeepColor;
         uniform vec3 uSurfaceColor;
@@ -130,16 +142,17 @@ export class OceanOfLight {
 
         void main() {
           // Normal/elevation color ramp with music intensity modulation
-          float h = clamp(vElevation * 3.0 + 0.35 + uOverall * 0.2, 0.0, 1.0);
+          float h = clamp(vElevation * 3.2 + 0.35 + uOverall * 0.25, 0.0, 1.0);
           vec3 col = mix(uDeepColor, uSurfaceColor, h);
 
-          // Add foam highlights on wave crests modulated by mid frequencies
-          float foam = pow(clamp(vElevation * 4.2 + 0.1, 0.0, 1.0), 3.0);
-          col = mix(col, uFoamColor, foam * (0.7 + uMid * 0.4));
+          // Add foam highlights on wave crests modulated by mid frequencies and sparkles
+          float foam = pow(clamp(vElevation * 4.0 + 0.08, 0.0, 1.0), 2.8);
+          vec3 crestCol = mix(uFoamColor, vec3(1.0, 1.0, 1.0), uHigh * 0.5);
+          col = mix(col, crestCol, foam * (0.75 + uMid * 0.45));
 
           // Distance fog falloff
           float dist = length(vWorldPos.xz);
-          float fog = clamp(1.0 - dist / 42.0, 0.0, 1.0);
+          float fog = clamp(1.0 - dist / 44.0, 0.0, 1.0);
 
           gl_FragColor = vec4(col, uAlpha * fog * 0.94);
         }
@@ -302,6 +315,96 @@ export class OceanOfLight {
     this.sprayPoints = new Points(this.sprayGeo, sprayMat);
     this.group.add(this.sprayPoints);
 
+    // 5. Transition 1: Luminous Ribbons flowing dissolving city into ocean waves (55s - 65s)
+    const ribbonGeo = new PlaneGeometry(8, 0.45, 12, 1);
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2 + 0.2;
+      const ribbonMat = new ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uProgress: { value: 0 },
+          uColor: { value: new Color(i % 2 === 0 ? 0x00f2fe : 0x38ef7d) },
+        },
+        vertexShader: `
+          uniform float uTime;
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            vec3 pos = position;
+            pos.y += sin(pos.x * 0.8 + uTime * 2.5) * 0.18;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float uProgress;
+          uniform float uTime;
+          uniform vec3 uColor;
+          varying vec2 vUv;
+          void main() {
+            float stream = fract(vUv.x * 2.0 - uTime * 1.5);
+            float alpha = sin(vUv.y * 3.14159) * pow(stream, 1.5) * uProgress;
+            gl_FragColor = vec4(uColor, alpha * 0.75);
+          }
+        `,
+        transparent: true,
+        blending: AdditiveBlending,
+        side: DoubleSide,
+        depthWrite: false,
+      });
+      const ribbon = new Mesh(ribbonGeo, ribbonMat);
+      ribbon.position.set(Math.cos(angle) * 5.5, 0.45, Math.sin(angle) * 5.5);
+      ribbon.rotation.y = angle + Math.PI * 0.5;
+      ribbon.rotation.x = 0.15;
+      this.transitionRibbons.push(ribbon);
+      this.group.add(ribbon);
+    }
+
+    // 6. Transition 2: Ascending Ocean Current Streamers (161s - 165s)
+    const streamerGeo = new PlaneGeometry(2.2, 14, 4, 16);
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const rad = 2.0 + (i % 3) * 1.2;
+      const streamerMat = new ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uProgress: { value: 0 },
+          uColor: { value: new Color(i % 2 === 0 ? 0x4df9ff : 0x9d4edd) },
+        },
+        vertexShader: `
+          uniform float uTime;
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            vec3 pos = position;
+            pos.x += sin(pos.y * 0.6 + uTime * 3.0) * 0.35;
+            pos.z += cos(pos.y * 0.6 + uTime * 2.5) * 0.35;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float uProgress;
+          uniform float uTime;
+          uniform vec3 uColor;
+          varying vec2 vUv;
+          void main() {
+            float stream = fract(vUv.y * 2.5 - uTime * 2.0);
+            float edge = sin(vUv.x * 3.14159);
+            float alpha = edge * stream * uProgress;
+            gl_FragColor = vec4(uColor, alpha * 0.8);
+          }
+        `,
+        transparent: true,
+        blending: AdditiveBlending,
+        side: DoubleSide,
+        depthWrite: false,
+      });
+      const streamer = new Mesh(streamerGeo, streamerMat);
+      streamer.position.set(Math.cos(angle) * rad, 5.0, Math.sin(angle) * rad);
+      streamer.rotation.y = angle;
+      this.ascendingStreamers.push(streamer);
+      this.group.add(streamer);
+    }
+
     // Initial state: Hidden
     this.group.visible = false;
   }
@@ -355,7 +458,36 @@ export class OceanOfLight {
     this.oceanMaterial.uniforms.uAlpha.value = this.oceanAlpha;
     this.oceanMaterial.uniforms.uBass.value = bass;
     this.oceanMaterial.uniforms.uMid.value = mid;
+    this.oceanMaterial.uniforms.uHigh.value = high;
     this.oceanMaterial.uniforms.uOverall.value = overall;
+
+    // Transition 1 ribbons flow (55s -> 65s): dissolve buildings into particles and luminous ribbons
+    let ribbonProg = 0;
+    if (relativeTime >= 55.0 && relativeTime <= 65.0) {
+      ribbonProg = Math.sin(((relativeTime - 55.0) / 10.0) * Math.PI);
+    }
+    for (let i = 0; i < this.transitionRibbons.length; i++) {
+      const mat = this.transitionRibbons[i].material as ShaderMaterial;
+      mat.uniforms.uProgress.value = ribbonProg;
+      mat.uniforms.uTime.value = relativeTime;
+    }
+
+    // Transition 2 ascending streamers (161s -> 165s): ocean currents lift into sky trails
+    let lift = 0;
+    let streamerProg = 0;
+    if (relativeTime >= 161.0 && relativeTime <= 165.0) {
+      lift = (relativeTime - 161.0) / 4.0;
+      streamerProg = Math.sin(((relativeTime - 161.0) / 4.0) * Math.PI);
+    } else if (relativeTime > 165.0 && relativeTime <= 170.0) {
+      lift = Math.max(0, 1.0 - (relativeTime - 165.0) / 5.0);
+      streamerProg = Math.max(0, 1.0 - (relativeTime - 165.0) / 3.0);
+    }
+    this.oceanMaterial.uniforms.uLift.value = lift;
+    for (let i = 0; i < this.ascendingStreamers.length; i++) {
+      const mat = this.ascendingStreamers[i].material as ShaderMaterial;
+      mat.uniforms.uProgress.value = streamerProg;
+      mat.uniforms.uTime.value = relativeTime;
+    }
 
     (this.floatingLotuses.material as ShaderMaterial).uniforms.uAlpha.value = this.oceanAlpha;
 
@@ -388,9 +520,16 @@ export class OceanOfLight {
     this.oceanAlpha = 0;
     this.group.visible = false;
     this.oceanMaterial.uniforms.uAlpha.value = 0;
+    this.oceanMaterial.uniforms.uLift.value = 0;
     (this.floatingLotuses.material as ShaderMaterial).uniforms.uAlpha.value = 0;
     for (let i = 0; i < this.lightCurtains.length; i++) {
       (this.lightCurtains[i].material as ShaderMaterial).uniforms.uAlpha.value = 0;
+    }
+    for (let i = 0; i < this.transitionRibbons.length; i++) {
+      (this.transitionRibbons[i].material as ShaderMaterial).uniforms.uProgress.value = 0;
+    }
+    for (let i = 0; i < this.ascendingStreamers.length; i++) {
+      (this.ascendingStreamers[i].material as ShaderMaterial).uniforms.uProgress.value = 0;
     }
   }
 

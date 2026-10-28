@@ -77,26 +77,50 @@ export class Particles {
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
     const { normalizedProgress, interpolatedColor } = frameData;
 
+    const relTime = frameData.relativeTime;
+
     this.scratchColor.setRGB(...interpolatedColor.primaryAccent);
+
+    // Transition 1 boost (55s -> 65s): particles swirl as city dissolves into aurora ribbons & ocean
+    const isTransition1 = relTime >= 55.0 && relTime <= 65.0;
+    const t1Factor = isTransition1 ? Math.sin(((relTime - 55.0) / 10.0) * Math.PI) : 0;
+
+    // Transition 2 boost (161s -> 175s): currents rise into star trails
+    const isTransition2 = relTime >= 161.0 && relTime <= 175.0;
+    const t2Factor = isTransition2 ? Math.sin(((relTime - 161.0) / 14.0) * Math.PI) : 0;
+
+    if (t1Factor > 0) {
+      // Blend toward bioluminescent aurora cyan/emerald
+      this.scratchColor.r = this.scratchColor.r * (1.0 - t1Factor * 0.5) + 0.15 * t1Factor * 0.5;
+      this.scratchColor.g = this.scratchColor.g * (1.0 - t1Factor * 0.5) + 0.95 * t1Factor * 0.5;
+      this.scratchColor.b = this.scratchColor.b * (1.0 - t1Factor * 0.5) + 0.98 * t1Factor * 0.5;
+    } else if (t2Factor > 0) {
+      // Blend toward radiant celestial white-cyan star trail glow
+      this.scratchColor.r = this.scratchColor.r * (1.0 - t2Factor * 0.4) + 0.90 * t2Factor * 0.4;
+      this.scratchColor.g = this.scratchColor.g * (1.0 - t2Factor * 0.4) + 0.95 * t2Factor * 0.4;
+      this.scratchColor.b = this.scratchColor.b * (1.0 - t2Factor * 0.4) + 1.00 * t2Factor * 0.4;
+    }
+
     this.material.color.copy(this.scratchColor);
 
-    // Particle visibility ramps with experience progression
-    let overallOpacity = 0.15;
-    if (normalizedProgress > 0.1) {
-      overallOpacity = Math.min(0.85, 0.2 + normalizedProgress * 0.6);
+    // Particle visibility ramps smoothly with experience progression
+    let overallOpacity = 0.25;
+    if (normalizedProgress > 0.08) {
+      overallOpacity = Math.min(0.85, 0.25 + normalizedProgress * 0.6);
     }
     if (normalizedProgress >= 0.96) {
       // Release fade out
-      overallOpacity = Math.max(0.1, (1.0 - normalizedProgress) / 0.04 * 0.8);
+      overallOpacity = Math.max(0.15, (1.0 - normalizedProgress) / 0.04 * 0.85);
     }
 
-    // Micro-FFT modulation: high frequencies excite particle size and opacity
-    const microJitter = 1.0 + metrics.high * 0.08;
-    this.material.opacity = overallOpacity * (0.8 + metrics.mid * 0.2);
-    this.material.size = 0.032 * microJitter;
+    // Highs and mids excite particle opacity and scale smoothly without jitter
+    const microJitter = 1.0 + metrics.high * 0.12 + t1Factor * 0.25 + t2Factor * 0.35;
+    this.material.opacity = Math.min(0.95, overallOpacity * (0.8 + metrics.mid * 0.25 + t1Factor * 0.2 + t2Factor * 0.25));
+    this.material.size = 0.034 * microJitter;
 
-    // Upward flow speed increases slightly during BUILD & CLIMAX
-    const speedMultiplier = 1.0 + (normalizedProgress > 0.45 ? 0.6 : 0.0) + metrics.overall * 0.4;
+    // Upward flow speed increases during transitions, musical builds, and climaxes
+    const transitionSpeed = 1.0 + t1Factor * 0.85 + t2Factor * 1.5;
+    const speedMultiplier = (1.0 + (normalizedProgress > 0.45 ? 0.4 : 0.0) + metrics.energy * 0.45) * transitionSpeed;
 
     const posAttr = this.geometry.getAttribute('position') as BufferAttribute;
     const array = posAttr.array as Float32Array;
@@ -106,12 +130,12 @@ export class Particles {
 
       // Update positions
       array[idx] += this.velocities[idx] * speedMultiplier * deltaSec;
-      array[idx + 1] += this.velocities[idx + 1] * speedMultiplier * deltaSec;
+      array[idx + 1] += (this.velocities[idx + 1] * speedMultiplier + t2Factor * 0.2) * deltaSec;
       array[idx + 2] += this.velocities[idx + 2] * speedMultiplier * deltaSec;
 
       // Wrap around gently if floated too high or drifted too far
-      if (array[idx + 1] > 3.2) {
-        array[idx + 1] = 0.2;
+      if (array[idx + 1] > 3.8) {
+        array[idx + 1] = 0.15;
       }
     }
 

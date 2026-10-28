@@ -1,3 +1,4 @@
+
 /**
  * Authored music timeline definitions and time mapping
  * For "A Sky Full of Stars" (266.92s full duration)

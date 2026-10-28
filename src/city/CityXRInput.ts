@@ -201,11 +201,13 @@ export class CityXRInput {
     // Check right controller first (preferred dominant hand), then left controller
     let targetedBlock: CityBlock | null = null;
 
-    if (hasRight) {
-      targetedBlock = this.findTargetBlock(rightGrip, rightRay);
-    }
-    if (!targetedBlock && hasLeft) {
-      targetedBlock = this.findTargetBlock(leftGrip, leftRay);
+    if (experienceWorld?.citySystem?.group.visible) {
+      if (hasRight) {
+        targetedBlock = this.findTargetBlock(rightGrip, rightRay);
+      }
+      if (!targetedBlock && hasLeft) {
+        targetedBlock = this.findTargetBlock(leftGrip, leftRay);
+      }
     }
 
     this.interaction.setHoveredBlock(targetedBlock);
@@ -273,7 +275,7 @@ export class CityXRInput {
     }
 
     // If already grabbing city block, ignore additional presses
-    if (this._activeGrabbedBlock) return;
+    if (this._activeGrabbedBlock || !experienceWorld?.citySystem?.group.visible) return;
 
     const target = this.findTargetBlock(grip, ray);
     if (target) {

@@ -130,46 +130,34 @@ export class OrganicForms {
   }
 
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
-    const { activeCue, normalizedProgress, interpolatedColor } = frameData;
+    const { relativeTime, interpolatedColor } = frameData;
+
+    if (relativeTime >= 65.0) {
+      if (this.group.visible) {
+        this.group.visible = false;
+      }
+      return;
+    }
+    this.group.visible = true;
 
     // Decay touch ripple energy smoothly
     if (this.touchRippleEnergy > 0) {
       this.touchRippleEnergy = Math.max(0, this.touchRippleEnergy - deltaSec * 1.8);
     }
 
-    // Determine state based on cue
-    switch (activeCue.event) {
-      case 'ARRIVAL':
-        this.lifeState = 'HIDDEN';
-        this.lifeProgress = 0;
-        break;
-
-      case 'DISCOVERY':
-        this.lifeState = 'EMERGING';
-        this.lifeProgress = frameData.cueProgress;
-        break;
-
-      case 'DEVELOPMENT':
-        this.lifeState = 'ACTIVE';
-        this.lifeProgress = 1.0;
-        break;
-
-      case 'BUILD':
-      case 'CLIMAX_PREP':
-        this.lifeState = 'RESPONDING';
-        this.lifeProgress = 1.0;
-        break;
-
-      case 'CLIMAX':
-        this.lifeState = 'TRANSFORMING';
-        this.lifeProgress = 1.0;
-        break;
-
-      case 'RELEASE':
-      case 'COMPLETE':
-        this.lifeState = 'DISSOLVING';
-        this.lifeProgress = 1.0 - frameData.cueProgress;
-        break;
+    // Determine state strictly based on Phase 1 timeline (0s - 55s) and dissolve (55s - 65s)
+    if (relativeTime >= 55.0) {
+      this.lifeState = 'DISSOLVING';
+      this.lifeProgress = Math.max(0.001, 1.0 - (relativeTime - 55.0) / 10.0);
+    } else if (relativeTime < 14.0) {
+      this.lifeState = 'EMERGING';
+      this.lifeProgress = relativeTime / 14.0;
+    } else if (relativeTime < 36.0) {
+      this.lifeState = 'ACTIVE';
+      this.lifeProgress = 1.0;
+    } else {
+      this.lifeState = 'RESPONDING';
+      this.lifeProgress = 1.0;
     }
 
     // Colors — tint toward teal primary, keep restrained
@@ -191,12 +179,7 @@ export class OrganicForms {
     const touchBoost = 1.0 + this.touchRippleEnergy * 0.12;
 
     // Apply visibility and scale based on lifeState
-    if (this.lifeState === 'HIDDEN') {
-      this.primaryRibbon.scale.set(0.001, 0.001, 0.001);
-      this.primaryMaterial.opacity = 0;
-      this.secondaryRibbons.forEach((m) => m.scale.set(0.001, 0.001, 0.001));
-      this.secondaryMaterials.forEach((m) => (m.opacity = 0));
-    } else if (this.lifeState === 'EMERGING') {
+    if (this.lifeState === 'EMERGING') {
       // Primary unfolds first
       const ease = this.lifeProgress * this.lifeProgress * (3 - 2 * this.lifeProgress);
       const targetScale = ease * microScale * touchBoost;
@@ -211,35 +194,23 @@ export class OrganicForms {
       this.primaryRibbon.scale.set(pScale, pScale, pScale);
       this.primaryMaterial.opacity = 0.85;
 
-      const secProgress = Math.min(1, (normalizedProgress - 0.26) / 0.15);
-      const secEase = Math.max(0, secProgress);
+      const secProgress = Math.min(1, Math.max(0, (relativeTime - 14.0) / 18.0));
       this.secondaryRibbons.forEach((m) => {
-        const s = secEase * microScale;
+        const s = secProgress * microScale;
         m.scale.set(s, s, s);
       });
-      this.secondaryMaterials.forEach((m) => (m.opacity = secEase * 0.7));
+      this.secondaryMaterials.forEach((m) => (m.opacity = secProgress * 0.7));
     } else if (this.lifeState === 'RESPONDING') {
       // Swelling in build
-      const buildScale = (1.05 + normalizedProgress * 0.15) * microScale * touchBoost;
+      const buildScale = (1.05 + Math.min(0.2, (relativeTime - 36.0) / 19.0 * 0.15)) * microScale * touchBoost;
       this.primaryRibbon.scale.set(buildScale, buildScale, buildScale);
       this.primaryMaterial.opacity = Math.min(0.95, 0.85 + metrics.overall * 0.1);
 
       this.secondaryRibbons.forEach((m) => {
-        const s = (1.0 + normalizedProgress * 0.12) * microScale;
+        const s = 1.0 * microScale;
         m.scale.set(s, s, s);
       });
       this.secondaryMaterials.forEach((m) => (m.opacity = 0.8));
-    } else if (this.lifeState === 'TRANSFORMING') {
-      // Climax: Maximum blooming expansion and radiant warmth
-      const climaxScale = (1.25 + metrics.high * 0.05) * touchBoost;
-      this.primaryRibbon.scale.set(climaxScale, climaxScale, climaxScale);
-      this.primaryMaterial.opacity = 0.95;
-
-      this.secondaryRibbons.forEach((m) => {
-        const s = 1.2 * microScale;
-        m.scale.set(s, s, s);
-      });
-      this.secondaryMaterials.forEach((m) => (m.opacity = 0.85));
     } else if (this.lifeState === 'DISSOLVING') {
       // Soft decrescendo dissolve
       const dissolve = Math.max(0.001, this.lifeProgress);
@@ -250,6 +221,11 @@ export class OrganicForms {
         m.scale.set(dissolve * 0.8, dissolve * 0.8, dissolve * 0.8);
       });
       this.secondaryMaterials.forEach((m) => (m.opacity = dissolve * 0.5));
+    } else {
+      this.primaryRibbon.scale.set(0.001, 0.001, 0.001);
+      this.primaryMaterial.opacity = 0;
+      this.secondaryRibbons.forEach((m) => m.scale.set(0.001, 0.001, 0.001));
+      this.secondaryMaterials.forEach((m) => (m.opacity = 0));
     }
 
     // Update material colors & emissive highlights
@@ -265,6 +241,17 @@ export class OrganicForms {
 
     // Gentle slow rotation of primary ribbon (respects motion budget: max 0.08 rad/s)
     this.primaryRibbon.rotation.y += deltaSec * 0.04;
+  }
+
+  reset(): void {
+    this.group.visible = true;
+    this.lifeState = 'HIDDEN';
+    this.lifeProgress = 0;
+    this.touchRippleEnergy = 0;
+    this.primaryRibbon.scale.set(0.001, 0.001, 0.001);
+    this.primaryMaterial.opacity = 0;
+    this.secondaryRibbons.forEach((m) => m.scale.set(0.001, 0.001, 0.001));
+    this.secondaryMaterials.forEach((m) => (m.opacity = 0));
   }
 
   dispose(): void {
