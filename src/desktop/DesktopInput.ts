@@ -149,6 +149,12 @@ export class DesktopInput {
         const hovered = experienceWorld.citySystem.interaction.hitTest(this.camera, this.mouseVec);
         experienceWorld.citySystem.interaction.setHoveredBlock(hovered);
       }
+
+      // Hover test for reachable pearlescent bubbles
+      if (experienceWorld?.soundBubbles?.group.visible) {
+        this.raycaster.setFromCamera(this.mouseVec, this.camera);
+        experienceWorld.soundBubbles.hoverTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
+      }
       return;
     }
 

@@ -132,6 +132,10 @@ export class ExperienceWorld {
    */
   onXRSessionStart(world: World): void {
     this.soundBubbles.setXRWorld(world);
+    const session = (world.renderer as any)?.xr?.getSession() || (world as any).session;
+    if (session) {
+      this.soundBubbles.bindXRSession(session);
+    }
   }
 
   onXRSessionEnd(): void {
@@ -193,8 +197,8 @@ export class ExperienceWorld {
     this.particles.update(frameData, metrics, deltaSec);
     this.waves.update(frameData, metrics, deltaSec);
 
-    // 6. Sound bubbles (float + pop interaction)
-    this.soundBubbles.update(frameData, metrics, deltaSec);
+    // 6. Sound bubbles (reachable pearlescent droplets + VR interaction)
+    this.soundBubbles.update(frameData, metrics, deltaSec, world);
 
     // 7. Climax event: Shooting star & Universe transition
     this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, metrics, world, camera);
