@@ -22,6 +22,8 @@ import { ShootingStarUniverse } from '../cinematic/ShootingStarUniverse.js';
 import { SolarSystem } from '../cinematic/SolarSystem.js';
 import { GlowingFlower } from './GlowingFlower.js';
 import { OceanOfLight } from './OceanOfLight.js';
+import { CosmicFireworks } from './CosmicFireworks.js';
+import { LightTrails } from './LightTrails.js';
 import { Camera, World } from '@iwsdk/core';
 
 export class ExperienceWorld {
@@ -36,6 +38,8 @@ export class ExperienceWorld {
   readonly citySystem: CitySystem;
   readonly glowingFlower: GlowingFlower;
   readonly oceanOfLight: OceanOfLight;
+  readonly cosmicFireworks: CosmicFireworks;
+  readonly lightTrails: LightTrails;
   readonly shootingStarUniverse: ShootingStarUniverse;
   readonly solarSystem: SolarSystem;
   readonly immersiveArchitecture: ImmersiveArchitecture;
@@ -55,17 +59,21 @@ export class ExperienceWorld {
     this.citySystem = new CitySystem(isQuest);
     this.glowingFlower = new GlowingFlower(isQuest);
     this.oceanOfLight = new OceanOfLight(isQuest);
+    this.cosmicFireworks = new CosmicFireworks(isQuest);
+    this.lightTrails = new LightTrails(isQuest);
     this.shootingStarUniverse = new ShootingStarUniverse(isQuest);
     this.shootingStarUniverse.setCityRef(this.citySystem.group);
     this.solarSystem = new SolarSystem(isQuest);
     this.immersiveArchitecture = new ImmersiveArchitecture(isQuest);
     this.goldenSanctuary = new GoldenSanctuary(isQuest);
-    this.soundBubbles = new SoundBubbles();
+    this.soundBubbles = new SoundBubbles(isQuest);
 
     // Assemble single persistent scene graph
     this.rootGroup.add(this.atmosphere.group);
     this.rootGroup.add(this.lighting.group);
     this.rootGroup.add(this.oceanOfLight.group);
+    this.rootGroup.add(this.cosmicFireworks.group);
+    this.rootGroup.add(this.lightTrails.group);
     this.rootGroup.add(this.citySystem.group);
     this.rootGroup.add(this.structures.group);
     this.rootGroup.add(this.organicForms.group);
@@ -148,8 +156,13 @@ export class ExperienceWorld {
     // 3.5 Flower approach and touch interaction
     this.glowingFlower.update(deltaSec, frameData.relativeTime, metrics, world, camera);
 
-    // 3.6 Living Ocean of Light
-    this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics);
+    // 3.6 Phase 2: 360° Cosmic Fireworks and Luminous Light Trails
+    this.cosmicFireworks.update(deltaSec, frameData.relativeTime, metrics);
+    this.lightTrails.update(deltaSec, frameData.relativeTime, metrics);
+
+    // 3.7 Living Ocean of Light with dynamic firework & trail reflections
+    const fireworkFlashes = this.cosmicFireworks.getActiveFlashes();
+    this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics, fireworkFlashes);
 
     // 3.7 WebXR controller proximity interactions (lotus touch & ocean surface reach)
     if (world?.renderer?.xr?.isPresenting) {
@@ -196,6 +209,8 @@ export class ExperienceWorld {
     this.organicForms.reset();
     this.glowingFlower.reset();
     this.oceanOfLight.reset();
+    this.cosmicFireworks.reset();
+    this.lightTrails.reset();
     this.shootingStarUniverse.reset();
     this.solarSystem.reset();
     this.immersiveArchitecture.reset();
@@ -210,6 +225,8 @@ export class ExperienceWorld {
     this.citySystem.dispose();
     this.glowingFlower.dispose();
     this.oceanOfLight.dispose();
+    this.cosmicFireworks.dispose();
+    this.lightTrails.dispose();
     this.waves.dispose();
     this.particles.dispose();
     this.lighting.dispose();

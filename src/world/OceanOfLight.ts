@@ -29,6 +29,7 @@ import {
   DoubleSide,
 } from '@iwsdk/core';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { FireworkFlash } from './CosmicFireworks.js';
 
 export interface OceanTimelineConfig {
   t_dissolve_start: number; // 24.0s (city begins dissolving into ocean)
@@ -95,6 +96,22 @@ export class OceanOfLight {
         uDeepColor: { value: new Color(0x06182c) },    // Deep luminous teal-indigo
         uSurfaceColor: { value: new Color(0x1a6b8c) }, // Bioluminescent turquoise
         uFoamColor: { value: new Color(0x7df9ff) },    // Cyan crest foam
+        // 360° Fireworks reflections
+        uFireworkPos0: { value: new Vector3(0, 15, -25) },
+        uFireworkPos1: { value: new Vector3(-20, 18, -15) },
+        uFireworkPos2: { value: new Vector3(20, 16, -20) },
+        uFireworkPos3: { value: new Vector3(0, 22, 25) },
+        uFireworkCol0: { value: new Color(0x00f2fe) },
+        uFireworkCol1: { value: new Color(0xff77e9) },
+        uFireworkCol2: { value: new Color(0x8a2be2) },
+        uFireworkCol3: { value: new Color(0xfff2b2) },
+        uFireworkInt0: { value: 0 },
+        uFireworkInt1: { value: 0 },
+        uFireworkInt2: { value: 0 },
+        uFireworkInt3: { value: 0 },
+        // Light trail reflections
+        uTrailReflectTime: { value: 0 },
+        uTrailReflectIntensity: { value: 0 },
       },
       vertexShader: `
         uniform float uTime;
@@ -130,12 +147,31 @@ export class OceanOfLight {
       `,
       fragmentShader: `
         uniform float uAlpha;
+        uniform float uTime;
+        uniform float uBass;
         uniform float uMid;
         uniform float uHigh;
         uniform float uOverall;
         uniform vec3 uDeepColor;
         uniform vec3 uSurfaceColor;
         uniform vec3 uFoamColor;
+
+        // Fireworks reflections
+        uniform vec3 uFireworkPos0;
+        uniform vec3 uFireworkPos1;
+        uniform vec3 uFireworkPos2;
+        uniform vec3 uFireworkPos3;
+        uniform vec3 uFireworkCol0;
+        uniform vec3 uFireworkCol1;
+        uniform vec3 uFireworkCol2;
+        uniform vec3 uFireworkCol3;
+        uniform float uFireworkInt0;
+        uniform float uFireworkInt1;
+        uniform float uFireworkInt2;
+        uniform float uFireworkInt3;
+        uniform float uTrailReflectTime;
+        uniform float uTrailReflectIntensity;
+
         varying vec2 vUv;
         varying vec3 vWorldPos;
         varying float vElevation;
@@ -149,6 +185,71 @@ export class OceanOfLight {
           float foam = pow(clamp(vElevation * 4.0 + 0.08, 0.0, 1.0), 2.8);
           vec3 crestCol = mix(uFoamColor, vec3(1.0, 1.0, 1.0), uHigh * 0.5);
           col = mix(col, crestCol, foam * (0.75 + uMid * 0.45));
+
+          // Compute surface normal from screen-space analytical derivatives
+          vec3 dX = dFdx(vWorldPos);
+          vec3 dY = dFdy(vWorldPos);
+          vec3 N = normalize(cross(dY, dX));
+          if (N.y < 0.0) N = -N;
+
+          // Seated eye-level view vector
+          vec3 V = normalize(vec3(0.0, 1.2, 0.0) - vWorldPos);
+          float NdotV = max(0.0, dot(N, V));
+
+          // Fresnel reflection sheen (Schlick approximation)
+          float fresnel = 0.08 + 0.92 * pow(1.0 - NdotV, 3.2);
+
+          // Accumulate specular and diffuse reflections from active 360° celestial fireworks
+          vec3 reflCol = vec3(0.0);
+
+          // Firework 0
+          if (uFireworkInt0 > 0.01) {
+            vec3 L = normalize(uFireworkPos0 - vWorldPos);
+            vec3 H = normalize(L + V);
+            float spec = pow(max(0.0, dot(N, H)), 24.0 + uBass * 18.0);
+            float dist = length(uFireworkPos0 - vWorldPos);
+            float diff = (1.0 / (1.0 + dist * 0.05)) * 0.45;
+            reflCol += uFireworkCol0 * (spec * 2.2 + diff) * uFireworkInt0;
+          }
+
+          // Firework 1
+          if (uFireworkInt1 > 0.01) {
+            vec3 L = normalize(uFireworkPos1 - vWorldPos);
+            vec3 H = normalize(L + V);
+            float spec = pow(max(0.0, dot(N, H)), 24.0 + uBass * 18.0);
+            float dist = length(uFireworkPos1 - vWorldPos);
+            float diff = (1.0 / (1.0 + dist * 0.05)) * 0.45;
+            reflCol += uFireworkCol1 * (spec * 2.2 + diff) * uFireworkInt1;
+          }
+
+          // Firework 2
+          if (uFireworkInt2 > 0.01) {
+            vec3 L = normalize(uFireworkPos2 - vWorldPos);
+            vec3 H = normalize(L + V);
+            float spec = pow(max(0.0, dot(N, H)), 24.0 + uBass * 18.0);
+            float dist = length(uFireworkPos2 - vWorldPos);
+            float diff = (1.0 / (1.0 + dist * 0.05)) * 0.45;
+            reflCol += uFireworkCol2 * (spec * 2.2 + diff) * uFireworkInt2;
+          }
+
+          // Firework 3
+          if (uFireworkInt3 > 0.01) {
+            vec3 L = normalize(uFireworkPos3 - vWorldPos);
+            vec3 H = normalize(L + V);
+            float spec = pow(max(0.0, dot(N, H)), 24.0 + uBass * 18.0);
+            float dist = length(uFireworkPos3 - vWorldPos);
+            float diff = (1.0 / (1.0 + dist * 0.05)) * 0.45;
+            reflCol += uFireworkCol3 * (spec * 2.2 + diff) * uFireworkInt3;
+          }
+
+          // Luminous Light Trails reflection sheen sweeping across the undulating water
+          float trailSheen = sin(vWorldPos.x * 0.16 + vWorldPos.z * 0.14 - uTime * 0.9) * 0.5 + 0.5;
+          trailSheen = pow(trailSheen, 4.0) * (0.35 + uMid * 0.65) * uTrailReflectIntensity;
+          vec3 trailCol = mix(vec3(0.0, 0.95, 1.0), vec3(0.95, 0.47, 0.91), sin(vWorldPos.x * 0.08 + uTime * 0.5) * 0.5 + 0.5);
+          reflCol += trailCol * trailSheen;
+
+          // Composite reflection with Fresnel sheen over existing water surface
+          col += reflCol * (fresnel * 0.85 + 0.15);
 
           // Distance fog falloff
           float dist = length(vWorldPos.xz);
@@ -412,7 +513,7 @@ export class OceanOfLight {
   /**
    * Main per-frame ocean animation update.
    */
-  update(deltaSec: number, relativeTime: number, metrics?: AudioMetrics): void {
+  update(deltaSec: number, relativeTime: number, metrics?: AudioMetrics, fireworkFlashes?: FireworkFlash[]): void {
     // In debug mode (?flowerdebug=1), show ocean continuously for instant inspection
     if (this.isDebugMode) {
       this.group.visible = true;
@@ -460,6 +561,34 @@ export class OceanOfLight {
     this.oceanMaterial.uniforms.uMid.value = mid;
     this.oceanMaterial.uniforms.uHigh.value = high;
     this.oceanMaterial.uniforms.uOverall.value = overall;
+
+    // Update active 360° fireworks reflections across the water surface
+    if (fireworkFlashes && fireworkFlashes.length >= 4) {
+      this.oceanMaterial.uniforms.uFireworkPos0.value.copy(fireworkFlashes[0].position);
+      this.oceanMaterial.uniforms.uFireworkCol0.value.copy(fireworkFlashes[0].color);
+      this.oceanMaterial.uniforms.uFireworkInt0.value = fireworkFlashes[0].intensity;
+
+      this.oceanMaterial.uniforms.uFireworkPos1.value.copy(fireworkFlashes[1].position);
+      this.oceanMaterial.uniforms.uFireworkCol1.value.copy(fireworkFlashes[1].color);
+      this.oceanMaterial.uniforms.uFireworkInt1.value = fireworkFlashes[1].intensity;
+
+      this.oceanMaterial.uniforms.uFireworkPos2.value.copy(fireworkFlashes[2].position);
+      this.oceanMaterial.uniforms.uFireworkCol2.value.copy(fireworkFlashes[2].color);
+      this.oceanMaterial.uniforms.uFireworkInt2.value = fireworkFlashes[2].intensity;
+
+      this.oceanMaterial.uniforms.uFireworkPos3.value.copy(fireworkFlashes[3].position);
+      this.oceanMaterial.uniforms.uFireworkCol3.value.copy(fireworkFlashes[3].color);
+      this.oceanMaterial.uniforms.uFireworkInt3.value = fireworkFlashes[3].intensity;
+    } else {
+      this.oceanMaterial.uniforms.uFireworkInt0.value = 0;
+      this.oceanMaterial.uniforms.uFireworkInt1.value = 0;
+      this.oceanMaterial.uniforms.uFireworkInt2.value = 0;
+      this.oceanMaterial.uniforms.uFireworkInt3.value = 0;
+    }
+
+    // Light trails reflection sheen
+    this.oceanMaterial.uniforms.uTrailReflectTime.value = relativeTime;
+    this.oceanMaterial.uniforms.uTrailReflectIntensity.value = this.oceanAlpha * (0.55 + mid * 0.45);
 
     // Transition 1 ribbons flow (55s -> 65s): dissolve buildings into particles and luminous ribbons
     let ribbonProg = 0;
@@ -521,6 +650,11 @@ export class OceanOfLight {
     this.group.visible = false;
     this.oceanMaterial.uniforms.uAlpha.value = 0;
     this.oceanMaterial.uniforms.uLift.value = 0;
+    this.oceanMaterial.uniforms.uFireworkInt0.value = 0;
+    this.oceanMaterial.uniforms.uFireworkInt1.value = 0;
+    this.oceanMaterial.uniforms.uFireworkInt2.value = 0;
+    this.oceanMaterial.uniforms.uFireworkInt3.value = 0;
+    this.oceanMaterial.uniforms.uTrailReflectIntensity.value = 0;
     (this.floatingLotuses.material as ShaderMaterial).uniforms.uAlpha.value = 0;
     for (let i = 0; i < this.lightCurtains.length; i++) {
       (this.lightCurtains[i].material as ShaderMaterial).uniforms.uAlpha.value = 0;
