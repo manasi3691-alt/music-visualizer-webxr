@@ -95,9 +95,12 @@ export class ExperienceWorld {
     const pos = targetPos || this.waveOrigin;
     this.waves.emitWave(pos, 3.8, 3.0);
 
-    // If touching near the crystal lotus flower, trigger petal glow & sway reaction
-    if (this.glowingFlower.group.visible) {
-      this.glowingFlower.triggerTouch();
+    // If touching specifically near the crystal lotus flower, trigger petal reaction
+    if (this.glowingFlower.group.visible && targetPos) {
+      const flowerPos = this.glowingFlower.flowerRoot.position;
+      if (targetPos.distanceTo(flowerPos) < 0.14) {
+        this.glowingFlower.triggerTouch();
+      }
     }
 
     // If reaching into the cosmic water (y <= 0.45m), emit expanding luminous cyan/teal ripple
@@ -171,18 +174,12 @@ export class ExperienceWorld {
     const fireworkFlashes = this.cosmicFireworks.getActiveFlashes();
     this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics, fireworkFlashes);
 
-    // 3.7 WebXR controller proximity interactions (lotus touch & ocean surface reach)
+    // 3.7 WebXR controller proximity interactions (ocean surface reach)
     if (world?.renderer?.xr?.isPresenting) {
       for (let i = 0; i < 2; i++) {
         const controller = world.renderer.xr.getController(i);
         if (controller) {
           controller.getWorldPosition(this.scratchHandPos);
-          if (this.glowingFlower.group.visible) {
-            const flowerPos = this.glowingFlower.flowerRoot.position;
-            if (this.scratchHandPos.distanceTo(flowerPos) < 0.28) {
-              this.glowingFlower.triggerTouch();
-            }
-          }
           if (this.oceanOfLight.group.visible && this.scratchHandPos.y <= 0.25 && this.scratchHandPos.y >= -0.2) {
             if (Math.random() < 0.1) {
               this.waves.emitWave(new Vector3(this.scratchHandPos.x, 0.08, this.scratchHandPos.z), 3.6, 2.2, [0.15, 0.85, 0.95]);

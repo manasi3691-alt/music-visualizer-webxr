@@ -78,7 +78,9 @@ export class GlowingFlower {
 
   private isQuest: boolean;
   private isSpawned = false;
+  private isArrived = false;
   private isDebugMode = false;
+  private lastRelativeTime = 0.0;
 
   // Blooming state machine
   private isBlooming = false;           // Target state: true = open, false = closed bud
@@ -157,8 +159,8 @@ export class GlowingFlower {
     // 2. Procedural Smooth Cupped Lotus Petals with individual base pivots
     this.buildCurvedLotusPetals();
 
-    // 3. Golden-White Center Stamen Core
-    const coreGeo = new SphereGeometry(0.019, isQuest ? 12 : 16, isQuest ? 10 : 14);
+    // 3. Golden-White Center Stamen Core (tucked neatly inside the closed bud)
+    const coreGeo = new SphereGeometry(0.010, isQuest ? 12 : 16, isQuest ? 10 : 14);
     this.centerCoreMat = new ShaderMaterial({
       uniforms: {
         uColor: { value: new Color(0xffdf80) },
@@ -193,7 +195,7 @@ export class GlowingFlower {
     this.flowerRoot.add(this.centerCore);
 
     // Center Stamen Halo
-    const haloGeo = new SphereGeometry(0.045, 12, 10);
+    const haloGeo = new SphereGeometry(0.022, 12, 10);
     this.centerGlowMat = new ShaderMaterial({
       uniforms: {
         uColor: { value: new Color(0xffdf80) },
@@ -375,10 +377,10 @@ export class GlowingFlower {
    */
   private buildCurvedLotusPetals(): void {
     const tiers = [
-      // Inner tier (5 petals): closed upright bud at -0.06 rad (-3.5°), opens outward 83° (1.45 rad)
-      { count: 5, radius: 0.024, tiltClosed: -0.06, tiltOpen: 1.45, length: 0.065, width: 0.034, cup: 0.016 },
-      // Outer tier (7 petals): closed wrapping bud at -0.02 rad (-1.1°), sweeps outward 129° (2.25 rad) into full spread
-      { count: 7, radius: 0.042, tiltClosed: -0.02, tiltOpen: 2.25, length: 0.082, width: 0.046, cup: 0.022 },
+      // Inner tier (6 petals): wraps around stamen core, forming tight upright inner bud (tiltClosed -0.06 rad, opens to 0.92 rad / 53°)
+      { count: 6, radius: 0.012, tiltClosed: -0.06, tiltOpen: 0.92, length: 0.076, width: 0.034, cup: 0.016 },
+      // Outer tier (8 petals): wraps tightly around inner petals in bud, spreads outward-upward in bloom (tiltClosed -0.08 rad, sweeps to 1.34 rad / 77°)
+      { count: 8, radius: 0.020, tiltClosed: -0.08, tiltOpen: 1.34, length: 0.092, width: 0.046, cup: 0.022 },
     ];
 
     let globalIndex = 0;
@@ -482,7 +484,7 @@ export class GlowingFlower {
         const baseGroup = new Group();
         baseGroup.position.set(
           Math.cos(angle) * tier.radius,
-          0.005 * tierIdx,
+          0.003 * tierIdx,
           Math.sin(angle) * tier.radius
         );
         baseGroup.rotation.y = Math.PI * 0.5 - angle;
@@ -504,7 +506,7 @@ export class GlowingFlower {
         this.petalMaterials.push(petalMat);
         this.flowerRoot.add(baseGroup);
 
-        const localTip = new Vector3(0, tier.length, -tier.cup * 0.85);
+        const localTip = new Vector3(0, tier.length, -tier.cup);
 
         this.petalData.push({
           baseGroup,
@@ -712,7 +714,7 @@ export class GlowingFlower {
    * Toggles blooming open <-> closing, and illuminates the touched petal.
    */
   triggerTouch(petalIndex?: number): boolean {
-    if (this.touchCooldownRemaining > 0) return false;
+    if (!this.isArrived || this.touchCooldownRemaining > 0) return false;
 
     // Toggle bloom state
     if (this.targetBloom < 0.5) {
@@ -780,8 +782,24 @@ export class GlowingFlower {
       if (session) this.bindXRSession(session);
     }
 
+    // 0. Detect seek backwards / song loop: reset immediately to pristine closed bud
+    if (relativeTime < this.lastRelativeTime - 1.0) {
+      this.reset();
+    }
+    this.lastRelativeTime = relativeTime;
+
+    // 0.1 Outside Phase 2 window: reset and hide
+    if (relativeTime < FLOWER_TIMELINE.t_spawn || relativeTime >= 175.0) {
+      if (this.group.visible || this.isSpawned || this.bloomProgress > 0) {
+        this.reset();
+      }
+      this.group.visible = false;
+      return;
+    }
+
     // 1. Spawning / Swooping Arrival (58s -> 65s)
     if (relativeTime >= FLOWER_TIMELINE.t_spawn && relativeTime < FLOWER_TIMELINE.t_arrival) {
+      this.isArrived = false;
       if (!this.isSpawned) {
         this.isSpawned = true;
         this.group.visible = true;
@@ -811,13 +829,16 @@ export class GlowingFlower {
     // 2. Active Interactive Phase 2 Window (65s -> 165s)
     // Flower center remains COMPLETELY STATIONARY — no whole-object rotation, sway, or bobbing!
     else if (relativeTime >= FLOWER_TIMELINE.t_arrival && relativeTime <= FLOWER_TIMELINE.t_touch_window_end) {
+      this.isArrived = true;
       this.group.visible = true;
       this.flowerRoot.position.copy(this.targetFocalPos);
       this.flowerRoot.rotation.set(0, 0, 0);
+      this.flowerRoot.scale.set(1.0, 1.0, 1.0);
       this.trailPoints.visible = false;
     }
     // 3. Cosmic Ascent Transition (165s -> 175s)
     else if (relativeTime > FLOWER_TIMELINE.t_touch_window_end && relativeTime < 175.0) {
+      this.isArrived = false;
       this.group.visible = true;
       const dissolveProgress = Math.max(0, Math.min(1, (relativeTime - FLOWER_TIMELINE.t_touch_window_end) / 10.0));
       const ease = dissolveProgress * dissolveProgress * (3.0 - 2.0 * dissolveProgress);
@@ -905,13 +926,13 @@ export class GlowingFlower {
     // 7. Golden-White Center Stamen Core & Halo Blooming State
     this.centerCoreMat.uniforms.uTime.value = relativeTime;
     this.centerCoreMat.uniforms.uBloom.value = this.bloomProgress;
-    const coreScale = 0.85 + this.bloomProgress * 0.40 + energy * 0.08;
+    const coreScale = 0.80 + this.bloomProgress * 0.40 + energy * 0.08;
     this.centerCore.scale.set(coreScale, coreScale, coreScale);
 
     this.centerGlowMat.uniforms.uTime.value = relativeTime;
     this.centerGlowMat.uniforms.uBloom.value = this.bloomProgress;
-    this.centerGlowMat.uniforms.uAlpha.value = (0.15 + this.bloomProgress * 0.60) * (0.85 + 0.15 * Math.sin(relativeTime * 3.0));
-    const haloScale = 0.70 + this.bloomProgress * 0.75;
+    this.centerGlowMat.uniforms.uAlpha.value = (0.10 + this.bloomProgress * 0.65) * (0.85 + 0.15 * Math.sin(relativeTime * 3.0));
+    const haloScale = 0.70 + this.bloomProgress * 0.80;
     this.centerGlow.scale.set(haloScale, haloScale, haloScale);
 
     // 8. Dynamic Stardust Sparkle Emission During Blooming Motion
@@ -933,6 +954,8 @@ export class GlowingFlower {
    * Updates individual petal hover highlights and triggers petal touch.
    */
   private processVRInteraction(): void {
+    if (!this.isArrived || !this.group.visible) return;
+
     const probePoints: { pos: Vector3; isFinger: boolean }[] = [];
     const pointingRays: { origin: Vector3; dir: Vector3 }[] = [];
 
@@ -1041,7 +1064,7 @@ export class GlowingFlower {
    * Handle WebXR selectstart (trigger pull or hand pinch raycast).
    */
   private handleXRSelect(e: any): void {
-    if (!this.group.visible || !this.xrWorld) return;
+    if (!this.isArrived || !this.group.visible || !this.xrWorld) return;
     const handedness = e.inputSource?.handedness || 'right';
 
     const p = this.xrWorld.player;
@@ -1061,7 +1084,7 @@ export class GlowingFlower {
    * Returns touched petal index or null.
    */
   hitTest(rayOrigin: Vector3, rayDir: Vector3): number | null {
-    if (!this.group.visible) return null;
+    if (!this.isArrived || !this.group.visible) return null;
 
     let closestPetal: PetalData | null = null;
     let closestDist = Infinity;
@@ -1108,7 +1131,7 @@ export class GlowingFlower {
    * Desktop mouse hover test across petals.
    */
   hoverTest(rayOrigin: Vector3, rayDir: Vector3): void {
-    if (!this.group.visible) return;
+    if (!this.isArrived || !this.group.visible) return;
 
     for (let i = 0; i < this.petalData.length; i++) {
       const petal = this.petalData[i];
@@ -1231,6 +1254,7 @@ export class GlowingFlower {
    */
   reset(): void {
     this.isSpawned = false;
+    this.isArrived = false;
     this.isBlooming = false;
     this.bloomProgress = 0.0;
     this.targetBloom = 0.0;
@@ -1254,10 +1278,17 @@ export class GlowingFlower {
       p.mat.uniforms.uBloomProgress.value = 0.0;
     }
 
+    if (this.centerCoreMat) {
+      this.centerCoreMat.uniforms.uBloom.value = 0.0;
+    }
+    if (this.centerGlowMat) {
+      this.centerGlowMat.uniforms.uBloom.value = 0.0;
+    }
+
     for (let p = 0; p < this.maxSparkles; p++) {
       this.sparkleAlphas[p] = 0.0;
     }
-    if (this.sparkleGeo.attributes.alpha) {
+    if (this.sparkleGeo && this.sparkleGeo.attributes.alpha) {
       this.sparkleGeo.attributes.alpha.needsUpdate = true;
     }
   }
