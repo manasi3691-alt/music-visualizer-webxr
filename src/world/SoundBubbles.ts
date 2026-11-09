@@ -99,9 +99,9 @@ export class SoundBubbles {
   constructor(isQuest = false) {
     this.maxParticles = isQuest ? 1200 : 2000;
 
-    // Build elegant, slender procedural teardrop water droplet geometry
-    // Base radius: 0.055m (5.5cm) — scaled to 4.5–6.2cm for small/mid and 7.5–8.8cm for feature
-    this.geoDroplet = this.buildTeardropGeometry(0.055, 24, 24);
+    // Build delicate, small, rounded procedural teardrop water droplet geometry
+    // Base radius: 0.022m (2.2cm) — small droplets (1.8–2.3cm) and feature droplets (3.0–3.3cm)
+    this.geoDroplet = this.buildTeardropGeometry(0.022, 24, 24);
 
     this.buildReachableBubbles();
     this.buildParticlePool();
@@ -164,8 +164,8 @@ export class SoundBubbles {
         pos.setZ(i, z * scaleXZ);
       }
 
-      // Elegant vertical proportion with slightly elongated top
-      const stretchY = normY > 0 ? y * 1.28 : y * 1.10;
+      // Delicate, rounded water droplet vertical proportion
+      const stretchY = normY > 0 ? y * 1.14 : y * 1.05;
       pos.setY(i, stretchY);
     }
 
@@ -189,7 +189,7 @@ export class SoundBubbles {
       hoverColor: Color;
       isFeature: boolean;
     }[] = [
-      // === 10 SMALL-TO-MEDIUM BUBBLES (scale 0.85 – 1.12, radius ~4.7cm to 6.2cm) ===
+      // === 10 SMALL-TO-MEDIUM DELICATE BUBBLES (scale 0.80 – 1.05, radius ~1.8cm to 2.3cm) ===
       // 0. Right-Front Low: effortless right-hand touch target
       {
         x: 0.32, y: 0.94, z: -0.48, scale: 0.95,
@@ -199,93 +199,93 @@ export class SoundBubbles {
       },
       // 1. Right-Front Mid: eye-level right
       {
-        x: 0.42, y: 1.15, z: -0.52, scale: 1.05,
+        x: 0.42, y: 1.15, z: -0.52, scale: 1.02,
         baseColor: new Color(0xff77e9), // Pearlescent Pink
         hoverColor: new Color(0x38ef7d),
         isFeature: false,
       },
       // 2. Right-Mid High: comfortable slight upward reach right
       {
-        x: 0.52, y: 1.34, z: -0.44, scale: 0.90,
+        x: 0.52, y: 1.34, z: -0.44, scale: 0.88,
         baseColor: new Color(0x8a2be2), // Royal Violet
         hoverColor: new Color(0x00f2fe),
         isFeature: false,
       },
       // 3. Right-Flank Mid: right side flank reach
       {
-        x: 0.62, y: 1.08, z: -0.34, scale: 1.10,
+        x: 0.62, y: 1.08, z: -0.34, scale: 1.05,
         baseColor: new Color(0xb39ddb), // Ethereal Lavender
         hoverColor: new Color(0xff77e9),
         isFeature: false,
       },
       // 4. Right-Low Armrest: relaxed low reach
       {
-        x: 0.28, y: 0.86, z: -0.42, scale: 0.85,
+        x: 0.28, y: 0.86, z: -0.42, scale: 0.80,
         baseColor: new Color(0xfff2b2), // Golden Pearl
         hoverColor: new Color(0xff77e9),
         isFeature: false,
       },
       // 5. Left-High Front: comfortably above the wrist UI
       {
-        x: -0.38, y: 1.36, z: -0.48, scale: 1.05,
+        x: -0.38, y: 1.36, z: -0.48, scale: 1.00,
         baseColor: new Color(0xb39ddb), // Ethereal Lavender
         hoverColor: new Color(0xff77e9),
         isFeature: false,
       },
       // 6. Left-Side Flank: left lateral reach
       {
-        x: -0.56, y: 1.18, z: -0.36, scale: 0.95,
+        x: -0.56, y: 1.18, z: -0.36, scale: 0.92,
         baseColor: new Color(0xf4a4a8), // Rose Gold
         hoverColor: new Color(0x00f2fe),
         isFeature: false,
       },
       // 7. Left-Side Low: relaxed low left reach (outside wrist box)
       {
-        x: -0.48, y: 0.88, z: -0.38, scale: 0.90,
+        x: -0.48, y: 0.88, z: -0.38, scale: 0.85,
         baseColor: new Color(0x1de9b6), // Aquamarine Turquoise
         hoverColor: new Color(0xfff2b2),
         isFeature: false,
       },
       // 8. Left-High Arch: arched upward left
       {
-        x: -0.26, y: 1.48, z: -0.46, scale: 1.00,
+        x: -0.26, y: 1.48, z: -0.46, scale: 0.96,
         baseColor: new Color(0xff4081), // Radiant Magenta
         hoverColor: new Color(0x80d8ff),
         isFeature: false,
       },
       // 9. Center-High Overhead: high above lotus sight-line
       {
-        x: 0.06, y: 1.54, z: -0.54, scale: 1.05,
+        x: 0.06, y: 1.54, z: -0.54, scale: 1.02,
         baseColor: new Color(0xe0f7fa), // Pearlescent Opal
         hoverColor: new Color(0xffd54f),
         isFeature: false,
       },
 
-      // === 3–4 FEATURE BUBBLES (scale 1.45 – 1.60, radius ~8.0cm to 8.8cm) ===
+      // === 3–4 FEATURE BUBBLES (scale 1.40 – 1.48, radius ~3.1cm to 3.3cm) ===
       // 10. Feature 1: Right Hero Droplet (primary right-hand showcase)
       {
-        x: 0.46, y: 1.25, z: -0.46, scale: 1.55,
+        x: 0.46, y: 1.25, z: -0.46, scale: 1.45,
         baseColor: new Color(0x00e5ff), // Luminous Cyan-Turquoise
         hoverColor: new Color(0xffe082),
         isFeature: true,
       },
       // 11. Feature 2: Left Hero Droplet (prominent left-hand showcase)
       {
-        x: -0.45, y: 1.32, z: -0.42, scale: 1.50,
+        x: -0.45, y: 1.32, z: -0.42, scale: 1.40,
         baseColor: new Color(0x9c27b0), // Royal Lavender-Violet
         hoverColor: new Color(0xff80ab),
         isFeature: true,
       },
       // 12. Feature 3: Right-Flank Hero Droplet (rich iridescent rose gold)
       {
-        x: 0.58, y: 1.42, z: -0.36, scale: 1.60,
+        x: 0.58, y: 1.42, z: -0.36, scale: 1.48,
         baseColor: new Color(0xff8a80), // Rose Gold Pearlescent
         hoverColor: new Color(0x84ffff),
         isFeature: true,
       },
       // 13. Feature 4: Overhead Crown Hero Droplet (magnificent rainbow pearl overhead)
       {
-        x: -0.05, y: 1.58, z: -0.52, scale: 1.50,
+        x: -0.05, y: 1.58, z: -0.52, scale: 1.42,
         baseColor: new Color(0xf8bbd0), // Rainbow Iridescent Pearl
         hoverColor: new Color(0x18ffff),
         isFeature: true,
@@ -648,9 +648,9 @@ export class SoundBubbles {
         b.mesh.updateMatrixWorld();
         this.scratchBubbleWorldPos.setFromMatrixPosition(b.mesh.matrixWorld);
 
-        // Touch hit radius scaled to the new compact droplet size (base 0.055m * scale)
-        const hitRadius = 0.075 * b.baseScale;
-        const hoverRadius = 0.26 * b.baseScale;
+        // Touch hit radius scaled to the new delicate compact droplet size (base 0.022m * scale)
+        const hitRadius = 0.040 * b.baseScale;
+        const hoverRadius = 0.20 * b.baseScale;
 
         // A. Test Proximity / Touch from probes
         let targetHover = 0;
@@ -670,7 +670,7 @@ export class SoundBubbles {
           }
 
           // Direct Touch Poke trigger!
-          if (dist <= hitRadius + (probe.isFinger ? 0.025 : 0.045)) {
+          if (dist <= hitRadius + (probe.isFinger ? 0.035 : 0.055)) {
             touched = true;
             break;
           }
@@ -810,7 +810,7 @@ export class SoundBubbles {
 
     // 85-100 glittering particles per burst (larger burst for feature bubbles)
     const count = b.isFeature ? 100 : 85;
-    const burstSpeed = b.isFeature ? 2.8 : 2.4;
+    const burstSpeed = b.isFeature ? 2.6 : 2.2;
     const baseCol = b.mat.uniforms.uBaseColor.value as Color;
 
     for (let i = 0; i < count; i++) {
@@ -818,10 +818,10 @@ export class SoundBubbles {
       this.nextParticleIndex = (this.nextParticleIndex + 1) % this.maxParticles;
       const p3 = pIdx * 3;
 
-      // Start at droplet world position
-      this.particlePositions[p3] = this.scratchBubbleWorldPos.x + (Math.random() - 0.5) * 0.04;
-      this.particlePositions[p3 + 1] = this.scratchBubbleWorldPos.y + (Math.random() - 0.5) * 0.04;
-      this.particlePositions[p3 + 2] = this.scratchBubbleWorldPos.z + (Math.random() - 0.5) * 0.04;
+      // Start at droplet world position with tight jitter matching droplet scale
+      this.particlePositions[p3] = this.scratchBubbleWorldPos.x + (Math.random() - 0.5) * 0.025;
+      this.particlePositions[p3 + 1] = this.scratchBubbleWorldPos.y + (Math.random() - 0.5) * 0.025;
+      this.particlePositions[p3 + 2] = this.scratchBubbleWorldPos.z + (Math.random() - 0.5) * 0.025;
 
       // Spherical radial scatter velocity
       const theta = Math.random() * Math.PI * 2;
@@ -919,7 +919,7 @@ export class SoundBubbles {
       if (projection > 0 && projection < 3.0) {
         this.scratchClosestPoint.copy(rayOrigin).addScaledVector(rayDir, projection);
         const dist = this.scratchClosestPoint.distanceTo(this.scratchBubbleWorldPos);
-        const hitRadius = 0.12 * b.baseScale;
+        const hitRadius = 0.075 * b.baseScale;
 
         if (dist < hitRadius && projection < closestDist) {
           closestDist = projection;
@@ -953,7 +953,7 @@ export class SoundBubbles {
       if (projection > 0 && projection < 3.0) {
         this.scratchClosestPoint.copy(rayOrigin).addScaledVector(rayDir, projection);
         const dist = this.scratchClosestPoint.distanceTo(this.scratchBubbleWorldPos);
-        const hoverRadius = 0.28 * b.baseScale;
+        const hoverRadius = 0.22 * b.baseScale;
         if (dist < hoverRadius) {
           b.hoverIntensity = Math.min(1.0, b.hoverIntensity + 0.18);
         }
