@@ -57,6 +57,26 @@ export class AudioEngine {
     return this.gainNode ? this.gainNode.gain.value : 1.0;
   }
 
+  /** Check if loop is enabled */
+  get isLooping(): boolean {
+    return this.audioElement?.loop ?? false;
+  }
+
+  /** Toggle loop state */
+  toggleLoop(): boolean {
+    if (this.audioElement) {
+      this.audioElement.loop = !this.audioElement.loop;
+      return this.audioElement.loop;
+    }
+    return false;
+  }
+
+  setLoop(val: boolean): void {
+    if (this.audioElement) {
+      this.audioElement.loop = val;
+    }
+  }
+
   /**
    * Prepares the audio element and verifies file availability
    */

@@ -42,13 +42,13 @@ import {
 } from './WristUIStyles.js';
 
 export interface UIControlMesh {
-  id: 'playPause' | 'restart' | 'status' | 'progress' | 'close' | 'rewind' | 'forward' | 'volUp' | 'volDown';
+  id: 'playPause' | 'restart' | 'status' | 'progress' | 'close' | 'rewind' | 'forward' | 'volUp' | 'volDown' | 'loop' | 'expand';
   mesh: Mesh;
   labelTexture: CanvasTexture | null;
 }
 
 // Interactive button IDs (exclude read-only: status, progress)
-type InteractiveControlId = 'playPause' | 'restart' | 'close' | 'rewind' | 'forward' | 'volUp' | 'volDown';
+export type InteractiveControlId = 'playPause' | 'restart' | 'close' | 'rewind' | 'forward' | 'volUp' | 'volDown' | 'loop' | 'expand';
 
 export class WristUI {
   readonly group: Group;
@@ -121,7 +121,7 @@ export class WristUI {
 
   getHitTestMeshes(): { mesh: Mesh; id: InteractiveControlId }[] {
     const result: { mesh: Mesh; id: InteractiveControlId }[] = [];
-    const ids: InteractiveControlId[] = ['playPause', 'restart', 'close', 'rewind', 'forward', 'volUp', 'volDown'];
+    const ids: InteractiveControlId[] = ['playPause', 'restart', 'close', 'rewind', 'forward', 'volUp', 'volDown', 'loop', 'expand'];
     for (const id of ids) {
       const ctrl = this.controls.get(id);
       if (ctrl) result.push({ mesh: ctrl.mesh, id });
@@ -482,12 +482,12 @@ export class WristUI {
     };
 
     const configs: RadialConfig[] = [
-      { id: 'rewind',  label: 'REWIND',   icon: '⏮ 10',  angleDeg: 150, color: WRIST_UI_PALETTE.tealAccent },
-      { id: 'forward', label: 'FORWARD',  icon: '10 ⏭',  angleDeg: 30,  color: WRIST_UI_PALETTE.tealAccent },
-      { id: 'volUp',   label: 'VOL +',    icon: '🔊+',   angleDeg: 330, color: WRIST_UI_PALETTE.goldAccent },
-      { id: 'volDown', label: 'VOL -',    icon: '🔉-',   angleDeg: 210, color: WRIST_UI_PALETTE.goldAccent },
-      { id: 'restart', label: 'RESTART',  icon: '↺',     angleDeg: 250, color: WRIST_UI_PALETTE.buttonBase },
-      { id: 'close',   label: 'CLOSE',    icon: '✕',     angleDeg: 110, color: WRIST_UI_PALETTE.closeButton },
+      { id: 'rewind',  label: 'REWIND',   icon: '⏮ 10',  angleDeg: 155, color: WRIST_UI_PALETTE.tealAccent },
+      { id: 'forward', label: 'FORWARD',  icon: '10 ⏭',  angleDeg: 25,  color: WRIST_UI_PALETTE.tealAccent },
+      { id: 'volUp',   label: 'VOL',      icon: '🔊',     angleDeg: 215, color: WRIST_UI_PALETTE.goldAccent },
+      { id: 'loop',    label: 'LOOP',     icon: '🔁',     angleDeg: 325, color: WRIST_UI_PALETTE.borderCyan },
+      { id: 'expand',  label: 'HUD',      icon: '❐',      angleDeg: 75,  color: WRIST_UI_PALETTE.playActive },
+      { id: 'close',   label: 'CLOSE',    icon: '✕',      angleDeg: 105, color: WRIST_UI_PALETTE.closeButton },
     ];
 
     const orbit = WRIST_UI_DIMENSIONS.radialOrbitRadius;

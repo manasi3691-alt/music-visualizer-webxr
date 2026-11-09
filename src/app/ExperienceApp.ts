@@ -120,6 +120,8 @@ export class ExperienceApp {
         seekRelative: (delta: number) => audioEngine.seekRelative(delta),
         setVolume: (v: number) => audioEngine.setVolume(v),
         getVolume: () => audioEngine.getVolume(),
+        toggleLoop: () => audioEngine.toggleLoop(),
+        isLooping: () => audioEngine.isLooping,
       },
       excerpt: {
         sourceStart: musicExcerpt.sourceStart,

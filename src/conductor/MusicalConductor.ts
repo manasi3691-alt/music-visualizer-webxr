@@ -62,8 +62,12 @@ export class MusicalConductor {
     const relTime = musicExcerpt.toRelativeTime(audioTime);
     const normProgress = musicExcerpt.toNormalizedProgress(audioTime);
 
-    // Check completion
+    // Check completion (honors loop setting)
     if (audioEngine.isPlaying && musicExcerpt.isComplete(audioTime)) {
+      if (audioEngine.isLooping) {
+        audioEngine.replay();
+        return this.frameData;
+      }
       if (experienceState.phase !== 'COMPLETE') {
         experienceState.setPhase('COMPLETE');
         audioEngine.stop();
