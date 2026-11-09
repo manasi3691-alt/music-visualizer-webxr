@@ -113,9 +113,14 @@ export class DesktopInput {
       }
     }
 
-    // Check if user clicked the glowing flower
+    // Check if user clicked the glowing flower or individual petals
     if (experienceWorld?.glowingFlower?.group.visible) {
       this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const hitPetal = experienceWorld.glowingFlower.hitTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
+      if (hitPetal !== null) {
+        experienceWorld.handleTouch(experienceWorld.glowingFlower.flowerRoot.position);
+        return;
+      }
       const intersects = this.raycaster.intersectObject(experienceWorld.glowingFlower.collisionSphere, true);
       if (intersects.length > 0) {
         if (experienceWorld.glowingFlower.triggerTouch()) {
@@ -154,6 +159,12 @@ export class DesktopInput {
       if (experienceWorld?.soundBubbles?.group.visible) {
         this.raycaster.setFromCamera(this.mouseVec, this.camera);
         experienceWorld.soundBubbles.hoverTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
+      }
+
+      // Hover test for crystal lotus flower petals
+      if (experienceWorld?.glowingFlower?.group.visible) {
+        this.raycaster.setFromCamera(this.mouseVec, this.camera);
+        experienceWorld.glowingFlower.hoverTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
       }
       return;
     }

@@ -128,18 +128,21 @@ export class ExperienceWorld {
   }
 
   /**
-   * Wire XR world into SoundBubbles for proximity detection
+   * Wire XR world into SoundBubbles and GlowingFlower for proximity detection
    */
   onXRSessionStart(world: World): void {
     this.soundBubbles.setXRWorld(world);
+    this.glowingFlower.setXRWorld(world);
     const session = (world.renderer as any)?.xr?.getSession() || (world as any).session;
     if (session) {
       this.soundBubbles.bindXRSession(session);
+      this.glowingFlower.bindXRSession(session);
     }
   }
 
   onXRSessionEnd(): void {
     this.soundBubbles.clearXRWorld();
+    this.glowingFlower.clearXRWorld();
   }
 
   /**
