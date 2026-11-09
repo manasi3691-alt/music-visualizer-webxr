@@ -1,15 +1,17 @@
 /**
  * GlowingFlower: Interactive Procedural Crystal Lotus Flower in WebXR.
  *
- * Radial Blooming Architecture:
+ * Fully Open Radial Blooming:
  * - The entire flower's center remains completely stationary (no whole-flower rotation, sway, or bobbing).
  * - Every petal has an individual pivot at its base on the tier circle.
- * - Each petal rotates purely around its own horizontal tangential hinge axis, opening outward and upward
- *   radially away from the center.
- * - Coordinated organic sequence: inner petals open first, followed by outer petals, gracefully revealing
- *   the glowing golden-white stamen core.
- * - Symmetrical radial spread creating a fully opened, breathtaking crystal lotus bloom.
- * - On the next touch/click, the flower smoothly reverses back into a closed crystal bud.
+ * - Outward radial orientation: local +Z points strictly outward away from the center (rotation.y = PI/2 - angle).
+ * - Tangential base hinge: rotating around local X moves the petal tip strictly outward and away from the center.
+ * - 180-degree sweep outward:
+ *     * Closed position: tight, elegant upright crystal bud (petals tucked inward at ~ -0.06 rad to -0.02 rad).
+ *     * Fully opened position: inner petals sweep outward ~106° (1.85 rad) to form a majestic open bowl,
+ *       and outer petals sweep outward ~158° (2.75 rad) spreading radially in all 360 degrees.
+ * - Organic sequence: inner petals open first (revealing the glowing golden-white stamen core), followed by outer petals.
+ * - Reversible: clicking or touching again smoothly reverses the motion back into a closed crystal bud.
  * - Preserves crystal materials, illuminating branched veins, pearlescent colours, VR hand/controller
  *   interaction, and desktop compatibility.
  * - Zero per-frame allocations, optimized for 72-90 fps on Meta Quest 3S.
@@ -149,7 +151,7 @@ export class GlowingFlower {
       this.isDebugMode = true;
     }
 
-    // 1. Root assembly - remains completely stationary once placed
+    // 1. Root assembly - remains completely stationary once arrived
     this.group.add(this.flowerRoot);
 
     // 2. Procedural Smooth Cupped Lotus Petals with individual base pivots
@@ -364,11 +366,19 @@ export class GlowingFlower {
   /**
    * Builds delicate lotus petals in 2 concentric tiers (5 inner, 7 outer).
    * Every petal is mounted on its own base pivot group and tangential base hinge.
+   *
+   * Crucial Rotation Geometry:
+   * baseGroup.rotation.y = Math.PI * 0.5 - angle
+   * This aligns local +Z strictly along the radial OUTWARD vector at angle theta,
+   * and local +X along the horizontal circle tangent (hinge axis).
+   * Rotating around local +X tilts the petal strictly and purely radially OUTWARD.
    */
   private buildCurvedLotusPetals(): void {
     const tiers = [
-      { count: 5, radius: 0.024, tiltClosed: 0.08, tiltOpen: 0.50, length: 0.065, width: 0.034, cup: 0.016 },
-      { count: 7, radius: 0.042, tiltClosed: 0.16, tiltOpen: 0.92, length: 0.082, width: 0.046, cup: 0.022 },
+      // Inner tier (5 petals): closed upright bud at -0.06 rad (-3.5°), opens outward 83° (1.45 rad)
+      { count: 5, radius: 0.024, tiltClosed: -0.06, tiltOpen: 1.45, length: 0.065, width: 0.034, cup: 0.016 },
+      // Outer tier (7 petals): closed wrapping bud at -0.02 rad (-1.1°), sweeps outward 129° (2.25 rad) into full spread
+      { count: 7, radius: 0.042, tiltClosed: -0.02, tiltOpen: 2.25, length: 0.082, width: 0.046, cup: 0.022 },
     ];
 
     let globalIndex = 0;
@@ -468,18 +478,18 @@ export class GlowingFlower {
         this.debugMaterials.push(normalMat);
 
         // 1. Fixed Base Pivot Group on the tier circle
-        // Positioned at petal base; rotated so local +Z faces radially outward from center
+        // Positioned at petal base; oriented so local +Z points strictly RADIAL OUTWARD away from (0,0,0)
         const baseGroup = new Group();
         baseGroup.position.set(
           Math.cos(angle) * tier.radius,
           0.005 * tierIdx,
           Math.sin(angle) * tier.radius
         );
-        baseGroup.rotation.y = -angle - Math.PI * 0.5;
+        baseGroup.rotation.y = Math.PI * 0.5 - angle;
 
         // 2. Individual Base Hinge Group
-        // Rotates strictly around its local horizontal X axis (tangential hinge)
-        // Tilts the petal radially outward and upward away from center
+        // Rotates around local X axis (tangent to circle).
+        // Positive X rotation moves the petal tip strictly OUTWARD away from the center!
         const hingeGroup = new Group();
         hingeGroup.rotation.x = tier.tiltClosed;
         baseGroup.add(hingeGroup);
@@ -624,7 +634,7 @@ export class GlowingFlower {
       const spd = (0.22 + Math.random() * 0.50) * speedMult;
 
       this.sparkleVelocities[p3] = Math.sin(phi) * Math.cos(theta) * spd;
-      this.sparkleVelocities[p3 + 1] = Math.sin(phi) * Math.sin(theta) * spd + 0.20; // Gentle upward drift
+      this.sparkleVelocities[p3 + 1] = Math.sin(phi) * Math.sin(theta) * spd + 0.20;
       this.sparkleVelocities[p3 + 2] = Math.cos(phi) * spd;
 
       const roll = Math.random();
@@ -658,7 +668,7 @@ export class GlowingFlower {
 
   /**
    * Computes stationary XR focal target position:
-   * 0.68m directly in front of seated user at comfortable chest/lap level (1.12m).
+   * 0.68m directly in front of seated user at comfortable chest level (1.12m).
    */
   updateFocalTarget(world?: World, camera?: Camera): void {
     if (!camera) return;
@@ -718,7 +728,7 @@ export class GlowingFlower {
 
     const touchedPetal = this.petalData[pIdx];
     touchedPetal.touchGlow = 1.0;
-    touchedPetal.flexOffset = 0.08; // Slight radial outward spring yield
+    touchedPetal.flexOffset = 0.08; // Radial outward spring yield
 
     // Sympathetic ripple on adjacent petals in the same tier
     const tierPetals = this.petalData.filter((p) => p.tier === touchedPetal.tier);
@@ -799,7 +809,7 @@ export class GlowingFlower {
       this.updateTrail(this.scratchCurrentPos, easeT);
     }
     // 2. Active Interactive Phase 2 Window (65s -> 165s)
-    // Flower remains COMPLETELY STATIONARY — no whole-object rotation, sway, or bobbing!
+    // Flower center remains COMPLETELY STATIONARY — no whole-object rotation, sway, or bobbing!
     else if (relativeTime >= FLOWER_TIMELINE.t_arrival && relativeTime <= FLOWER_TIMELINE.t_touch_window_end) {
       this.group.visible = true;
       this.flowerRoot.position.copy(this.targetFocalPos);
@@ -827,7 +837,7 @@ export class GlowingFlower {
 
     // 4. Smooth Organic Blooming Interpolation (critically damped spring)
     const prevBloom = this.bloomProgress;
-    const bloomSpeed = 2.4;
+    const bloomSpeed = 1.8; // Smooth, gradual organic blooming animation
     this.bloomProgress += (this.targetBloom - this.bloomProgress) * (1.0 - Math.exp(-deltaSec * bloomSpeed));
     this.bloomVelocity = Math.abs(this.bloomProgress - prevBloom) / Math.max(0.001, deltaSec);
 
@@ -835,14 +845,14 @@ export class GlowingFlower {
     const high = metrics ? metrics.high : 0;
     const energy = metrics ? metrics.overall : 0;
 
-    // 5. Sequential Radial Blooming Kinematics:
-    // Inner petals open FIRST (progress 0.0 -> 0.72)
-    // Outer petals open SECOND (progress 0.28 -> 1.0)
+    // 5. Staggered Radial Sequence:
+    // Inner petals open FIRST (progress 0.0 -> 0.70)
+    // Outer petals open SECOND (progress 0.22 -> 1.0)
     const b = this.bloomProgress;
-    const uInner = Math.max(0.0, Math.min(1.0, b / 0.72));
+    const uInner = Math.max(0.0, Math.min(1.0, b / 0.70));
     const smoothInner = uInner * uInner * (3.0 - 2.0 * uInner);
 
-    const uOuter = Math.max(0.0, Math.min(1.0, (b - 0.28) / (1.0 - 0.28)));
+    const uOuter = Math.max(0.0, Math.min(1.0, (b - 0.22) / (1.0 - 0.22)));
     const smoothOuter = uOuter * uOuter * (3.0 - 2.0 * uOuter);
 
     this.flowerRoot.updateMatrixWorld();
@@ -868,6 +878,7 @@ export class GlowingFlower {
       p.currentTilt = baseTilt + p.flexOffset;
 
       // Pure radial rotation around individual base hinge!
+      // Rotating around local X moves the petal strictly outward away from center!
       p.hingeGroup.rotation.x = p.currentTilt;
 
       // Update world positions of tip & body for proximity and sparkles
