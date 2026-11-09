@@ -1,30 +1,18 @@
 /**
  * GlowingFlower: Interactive Procedural Crystal Lotus Flower in WebXR.
  *
- * Tailored for Meta Quest 3S seated VR experience:
- * - 12 organic curved crystal lotus petals in 2 concentric tiers (5 inner, 7 outer).
- * - Living Interactive Blooming:
- *     * Petals are individually interactive.
- *     * Touching or selecting any petal gracefully animates the lotus unfolding from
- *       a closed/partially-closed crystal bud into a fully open, magnificent crystal lotus.
- *     * Touching it again gently animates it back to a closed bud.
- *     * Petals animate with smooth, organic rotations and harmonic spring damping (no popping/scaling).
- *     * Staggered tier kinematics: outer petals lead the opening, inner petals lead the closing.
- *     * Individual petals respond to touch with immediate soft glow, localized sway, and stardust sparks,
- *       while coordinating the overarching flower bloom.
- * - Magical Visual Response:
- *     * Soft luminous glow to the touched petal with ripple to neighbors.
- *     * Delicate sparkling stardust particles and luminous trails around petal tips during unfurling.
- *     * Intricate crystalline branched veins gradually illuminate in brilliant electric turquoise/cyan during blooming.
- *     * Radiant golden-white stamen core and breathing halo when fully open.
- *     * Preserves translucent turquoise, cyan, blossom pink, lavender, and royal violet crystal appearance.
- * - Genuine VR Interaction:
- *     * Multi-modal: Meta Quest 3S hand tracking index fingertips, controller grips, and pointing rays.
- *     * Subtle approach highlight: glowing rim aura and edge glimmer when hand or controller nears a petal.
- *     * Perfectly calibrated seated reach distance (0.68m) directly in front of seated user at chest level.
- *     * Debounced toggle prevents multi-frame chatter while remaining effortlessly responsive.
- *     * Full desktop raycast and mouse hover support.
- * - Zero per-frame allocations, fully optimized for 72-90 fps on Meta Quest 3S.
+ * Radial Blooming Architecture:
+ * - The entire flower's center remains completely stationary (no whole-flower rotation, sway, or bobbing).
+ * - Every petal has an individual pivot at its base on the tier circle.
+ * - Each petal rotates purely around its own horizontal tangential hinge axis, opening outward and upward
+ *   radially away from the center.
+ * - Coordinated organic sequence: inner petals open first, followed by outer petals, gracefully revealing
+ *   the glowing golden-white stamen core.
+ * - Symmetrical radial spread creating a fully opened, breathtaking crystal lotus bloom.
+ * - On the next touch/click, the flower smoothly reverses back into a closed crystal bud.
+ * - Preserves crystal materials, illuminating branched veins, pearlescent colours, VR hand/controller
+ *   interaction, and desktop compatibility.
+ * - Zero per-frame allocations, optimized for 72-90 fps on Meta Quest 3S.
  */
 
 import {
@@ -59,6 +47,8 @@ export const FLOWER_TIMELINE: FlowerTimelineConfig = {
 };
 
 interface PetalData {
+  baseGroup: Group;        // Fixed position & radial azimuth heading on tier circle
+  hingeGroup: Group;       // Tangential base hinge (only rotates around local X)
   mesh: Mesh;
   mat: ShaderMaterial;
   tier: number;            // 0 = inner (5 petals), 1 = outer (7 petals)
@@ -68,16 +58,15 @@ interface PetalData {
   length: number;
   width: number;
   cupDepth: number;
-  tiltClosed: number;      // Upright bud angle (rad)
-  tiltOpen: number;        // Flared bloom angle (rad)
+  tiltClosed: number;      // Tight bud angle (rad)
+  tiltOpen: number;        // Fully opened bloom angle (rad)
   currentTilt: number;     // Current animated tilt
   localTip: Vector3;       // Pre-computed local tip position
   worldTip: Vector3;       // Scratch world position of tip
   worldCenter: Vector3;    // Scratch world position of petal body
   hoverIntensity: number;  // 0 to 1
   touchGlow: number;       // 0 to 1
-  swayAmp: number;         // Individual harmonic spring recoil
-  swayPhase: number;       // Phase accumulator
+  flexOffset: number;      // Radial spring yield when touched
 }
 
 export class GlowingFlower {
@@ -90,10 +79,10 @@ export class GlowingFlower {
   private isDebugMode = false;
 
   // Blooming state machine
-  private isBlooming = false;      // Target: true = open (1.0), false = closed bud (0.15)
-  private bloomProgress = 0.15;    // Current continuous bloom fraction (0.15 closed -> 1.0 open)
-  private bloomVelocity = 0.0;     // Rate of opening/closing for sparkle emission
-  private targetBloom = 0.15;      // Target bloom fraction
+  private isBlooming = false;           // Target state: true = open, false = closed bud
+  private bloomProgress = 0.0;          // 0.0 (closed bud) -> 1.0 (fully open bloom)
+  private bloomVelocity = 0.0;          // Opening/closing speed for sparkle emission
+  private targetBloom = 0.0;            // Target bloom fraction
   private touchCooldownRemaining = 0.0; // Debounce timer (seconds)
 
   // Petals
@@ -160,10 +149,10 @@ export class GlowingFlower {
       this.isDebugMode = true;
     }
 
-    // 1. Root assembly
+    // 1. Root assembly - remains completely stationary once placed
     this.group.add(this.flowerRoot);
 
-    // 2. Procedural Smooth Cupped Lotus Petals
+    // 2. Procedural Smooth Cupped Lotus Petals with individual base pivots
     this.buildCurvedLotusPetals();
 
     // 3. Golden-White Center Stamen Core
@@ -171,7 +160,7 @@ export class GlowingFlower {
     this.centerCoreMat = new ShaderMaterial({
       uniforms: {
         uColor: { value: new Color(0xffdf80) },
-        uBloom: { value: 0.15 },
+        uBloom: { value: 0.0 },
         uTime: { value: 0 },
       },
       vertexShader: `
@@ -188,7 +177,6 @@ export class GlowingFlower {
         varying vec3 vNormal;
         void main() {
           float rim = max(0.0, dot(vNormal, vec3(0.0, 1.0, 0.4)));
-          // Shimmer and warm white radiance when blooming open
           vec3 warmCore = mix(vec3(0.95, 0.72, 0.35), vec3(1.0, 0.98, 0.92), uBloom);
           float pulse = 0.92 + 0.08 * sin(uTime * 3.5);
           vec3 col = warmCore * (0.85 + 0.45 * rim) * pulse;
@@ -207,8 +195,8 @@ export class GlowingFlower {
     this.centerGlowMat = new ShaderMaterial({
       uniforms: {
         uColor: { value: new Color(0xffdf80) },
-        uAlpha: { value: 0.20 },
-        uBloom: { value: 0.15 },
+        uAlpha: { value: 0.15 },
+        uBloom: { value: 0.0 },
         uTime: { value: 0 },
       },
       vertexShader: `
@@ -318,7 +306,7 @@ export class GlowingFlower {
 
   /**
    * Generates a curved parametric lotus petal geometry.
-   * Teardrop curved profile with smooth inward cupping.
+   * Petal base is at (0, 0, 0), extends upward along +Y, with smooth inward cupping along -Z.
    */
   private createCurvedPetalGeometry(width: number, length: number, cupDepth: number): BufferGeometry {
     const uSegs = 6;
@@ -374,13 +362,13 @@ export class GlowingFlower {
   }
 
   /**
-   * Builds delicate lotus petals in 2 cupped concentric tiers (inner 5, outer 7).
-   * Total 12 individually interactive petals.
+   * Builds delicate lotus petals in 2 concentric tiers (5 inner, 7 outer).
+   * Every petal is mounted on its own base pivot group and tangential base hinge.
    */
   private buildCurvedLotusPetals(): void {
     const tiers = [
-      { count: 5, radius: 0.024, tiltClosed: 0.09, tiltOpen: 0.48, length: 0.065, width: 0.034, cup: 0.016 },
-      { count: 7, radius: 0.042, tiltClosed: 0.18, tiltOpen: 0.86, length: 0.082, width: 0.046, cup: 0.022 },
+      { count: 5, radius: 0.024, tiltClosed: 0.08, tiltOpen: 0.50, length: 0.065, width: 0.034, cup: 0.016 },
+      { count: 7, radius: 0.042, tiltClosed: 0.16, tiltOpen: 0.92, length: 0.082, width: 0.046, cup: 0.022 },
     ];
 
     let globalIndex = 0;
@@ -393,11 +381,11 @@ export class GlowingFlower {
         const petalMat = new ShaderMaterial({
           uniforms: {
             uTime: { value: 0 },
-            uBloomProgress: { value: 0.15 },
+            uBloomProgress: { value: 0.0 },
             uTouchGlow: { value: 0.0 },
             uHover: { value: 0.0 },
             uHigh: { value: 0.0 },
-            uBaseColor: { value: new Color(0x1ca3c4) },      // Delicate turquoise
+            uBaseColor: { value: new Color(0x1ca3c4) },      // Translucent turquoise
             uEdgeColor: { value: new Color(0x6ee7b7) },      // Mint/cyan luminous edge
             uHighlightColor: { value: new Color(0xf472b6) }, // Soft blossom pink/magenta tip
             uOpacity: { value: 0.90 },
@@ -405,7 +393,6 @@ export class GlowingFlower {
           vertexShader: `
             uniform float uTime;
             uniform float uTouchGlow;
-            uniform float uBloomProgress;
 
             varying vec2 vUv;
             varying vec3 vNormal;
@@ -415,8 +402,8 @@ export class GlowingFlower {
               vUv = uv;
               vNormal = normalize(normalMatrix * normal);
 
-              // Organic gentle fluttering ripple along petal body
-              float flutter = sin(uTime * 3.2 + position.y * 22.0) * (0.002 + uTouchGlow * 0.004);
+              // Delicate surface shimmer flutter
+              float flutter = sin(uTime * 3.0 + position.y * 24.0) * (0.0015 + uTouchGlow * 0.003);
               vec3 pos = position + normal * flutter;
 
               vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -443,29 +430,26 @@ export class GlowingFlower {
               float tip = vUv.y;
               float edge = abs(vUv.x - 0.5) * 2.0;
 
-              // Detailed crystalline branched veins that illuminate dynamically as the lotus blooms!
+              // Detailed crystalline veins illuminating during radial blooming
               float vein1 = sin(vUv.x * 26.0 + vUv.y * 14.0 + uTime * 1.5) * 0.5 + 0.5;
               float vein2 = cos(vUv.x * 16.0 - vUv.y * 24.0 + uTime * 1.0) * 0.5 + 0.5;
               float crystalVeins = pow(vein1 * vein2, 1.5) * 2.4;
 
-              // Vein illumination increases dramatically during blooming
               float veinBloom = mix(0.18, 1.0, uBloomProgress);
               float veinPower = (0.22 + uHigh * 0.50 + uTouchGlow * 0.70) * veinBloom;
 
               vec3 col = mix(uBaseColor, uEdgeColor, edge * 0.65);
-              // Pink/magenta blossom flush toward petal tip
               col = mix(col, uHighlightColor, pow(tip, 1.5) * 0.78);
-              // Illuminating crystal veins (electric cyan & lavender)
               col += vec3(0.70, 0.95, 1.0) * crystalVeins * veinPower;
 
-              // Soft luminous radiance to touched petal
+              // Soft glow on touched petal
               col += vec3(0.35, 0.88, 1.0) * (uTouchGlow * 0.80);
               col += uHighlightColor * (uTouchGlow * 0.45);
 
-              // Hover highlight: soft rim aura and edge glimmer when hand/ray approaches
+              // Hover highlight on approached petal
               col += uEdgeColor * (uHover * (pow(edge, 1.8) * 0.95 + 0.35));
 
-              // Smooth fresnel rim
+              // Fresnel rim
               vec3 N = normalize(vNormal);
               vec3 V = normalize(vViewDir);
               float fresnel = 1.0 - max(0.0, dot(N, V));
@@ -483,23 +467,38 @@ export class GlowingFlower {
         const normalMat = new MeshNormalMaterial({ side: DoubleSide });
         this.debugMaterials.push(normalMat);
 
-        const petalMesh = new Mesh(petalGeo, this.isDebugMode ? normalMat : petalMat);
-        petalMesh.position.set(
+        // 1. Fixed Base Pivot Group on the tier circle
+        // Positioned at petal base; rotated so local +Z faces radially outward from center
+        const baseGroup = new Group();
+        baseGroup.position.set(
           Math.cos(angle) * tier.radius,
           0.005 * tierIdx,
           Math.sin(angle) * tier.radius
         );
-        petalMesh.rotation.y = -angle - Math.PI * 0.5;
-        petalMesh.rotation.x = tier.tiltClosed;
+        baseGroup.rotation.y = -angle - Math.PI * 0.5;
+
+        // 2. Individual Base Hinge Group
+        // Rotates strictly around its local horizontal X axis (tangential hinge)
+        // Tilts the petal radially outward and upward away from center
+        const hingeGroup = new Group();
+        hingeGroup.rotation.x = tier.tiltClosed;
+        baseGroup.add(hingeGroup);
+
+        // 3. Petal Mesh mounted directly at the hinge origin (0, 0, 0)
+        const petalMesh = new Mesh(petalGeo, this.isDebugMode ? normalMat : petalMat);
+        petalMesh.position.set(0, 0, 0);
+        petalMesh.rotation.set(0, 0, 0);
+        hingeGroup.add(petalMesh);
 
         this.petals.push(petalMesh);
         this.petalMaterials.push(petalMat);
-        this.flowerRoot.add(petalMesh);
+        this.flowerRoot.add(baseGroup);
 
-        // Petal local tip coordinates: base at (0,0,0), tip at y=length, z = -cupDepth
         const localTip = new Vector3(0, tier.length, -tier.cup * 0.85);
 
         this.petalData.push({
+          baseGroup,
+          hingeGroup,
           mesh: petalMesh,
           mat: petalMat,
           tier: tierIdx,
@@ -517,8 +516,7 @@ export class GlowingFlower {
           worldCenter: new Vector3(),
           hoverIntensity: 0.0,
           touchGlow: 0.0,
-          swayAmp: 0.0,
-          swayPhase: 0.0,
+          flexOffset: 0.0,
         });
       }
     });
@@ -589,7 +587,6 @@ export class GlowingFlower {
           float dist = length(coord);
           if (dist > 0.5) discard;
 
-          // 4-pointed cross star diffraction + soft bright core
           float starX = max(0.0, 1.0 - abs(coord.x) * 5.0) * max(0.0, 1.0 - abs(coord.y) * 1.8);
           float starY = max(0.0, 1.0 - abs(coord.y) * 5.0) * max(0.0, 1.0 - abs(coord.x) * 1.8);
           float starCross = max(starX, starY);
@@ -610,7 +607,7 @@ export class GlowingFlower {
   }
 
   /**
-   * Spawns a burst of delicate sparkling stardust particles at a specific world location.
+   * Spawns delicate sparkling stardust particles at a specific world location.
    */
   private emitSparkleBurst(pos: Vector3, count = 12, speedMult = 1.0): void {
     for (let i = 0; i < count; i++) {
@@ -624,23 +621,22 @@ export class GlowingFlower {
 
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2.0 * Math.random() - 1.0);
-      const spd = (0.25 + Math.random() * 0.55) * speedMult;
+      const spd = (0.22 + Math.random() * 0.50) * speedMult;
 
       this.sparkleVelocities[p3] = Math.sin(phi) * Math.cos(theta) * spd;
-      this.sparkleVelocities[p3 + 1] = Math.sin(phi) * Math.sin(theta) * spd + 0.22; // Upward float
+      this.sparkleVelocities[p3 + 1] = Math.sin(phi) * Math.sin(theta) * spd + 0.20; // Gentle upward drift
       this.sparkleVelocities[p3 + 2] = Math.cos(phi) * spd;
 
-      // Color variation: cyan, turquoise, blossom pink, lavender, and diamond white
       const roll = Math.random();
-      if (roll < 0.25) {
+      if (roll < 0.28) {
         this.sparkleColors[p3] = 0.0;
         this.sparkleColors[p3 + 1] = 0.95;
         this.sparkleColors[p3 + 2] = 1.0;
-      } else if (roll < 0.50) {
+      } else if (roll < 0.55) {
         this.sparkleColors[p3] = 0.96;
         this.sparkleColors[p3 + 1] = 0.45;
         this.sparkleColors[p3 + 2] = 0.72;
-      } else if (roll < 0.75) {
+      } else if (roll < 0.78) {
         this.sparkleColors[p3] = 0.75;
         this.sparkleColors[p3 + 1] = 0.62;
         this.sparkleColors[p3 + 2] = 1.0;
@@ -651,9 +647,9 @@ export class GlowingFlower {
       }
 
       this.sparkleAlphas[pIdx] = 1.0;
-      this.sparkleSizes[pIdx] = 0.036 + Math.random() * 0.028;
+      this.sparkleSizes[pIdx] = 0.034 + Math.random() * 0.026;
       this.sparkleLifetimes[pIdx] = 0.0;
-      this.sparkleMaxLifetimes[pIdx] = 1.3 + Math.random() * 0.8;
+      this.sparkleMaxLifetimes[pIdx] = 1.3 + Math.random() * 0.7;
     }
 
     this.sparkleGeo.attributes.customColor.needsUpdate = true;
@@ -661,8 +657,8 @@ export class GlowingFlower {
   }
 
   /**
-   * Computes XR-safe focal target point:
-   * 0.68m in front of seated user's eyes at comfortable chest/lap level (1.12m).
+   * Computes stationary XR focal target position:
+   * 0.68m directly in front of seated user at comfortable chest/lap level (1.12m).
    */
   updateFocalTarget(world?: World, camera?: Camera): void {
     if (!camera) return;
@@ -684,7 +680,6 @@ export class GlowingFlower {
       this.scratchForward.normalize();
     }
 
-    // Seated arm's reach distance: 0.68m (comfortable relaxed touch range)
     const targetDistance = 0.68;
     this.targetFocalPos.copy(this.scratchHeadPos).addScaledVector(this.scratchForward, targetDistance);
     this.targetFocalPos.y = Math.max(1.08, this.scratchHeadPos.y - 0.12);
@@ -704,7 +699,7 @@ export class GlowingFlower {
 
   /**
    * Main touch reaction trigger.
-   * Gracefully toggles blooming open <-> closing, and illuminates the touched petal.
+   * Toggles blooming open <-> closing, and illuminates the touched petal.
    */
   triggerTouch(petalIndex?: number): boolean {
     if (this.touchCooldownRemaining > 0) return false;
@@ -714,18 +709,16 @@ export class GlowingFlower {
       this.targetBloom = 1.0;
       this.isBlooming = true;
     } else {
-      this.targetBloom = 0.15;
+      this.targetBloom = 0.0;
       this.isBlooming = false;
     }
 
-    // Identify touched petal (or pick foremost petal if unspecified)
     let pIdx = petalIndex !== undefined ? petalIndex : 0;
     if (pIdx < 0 || pIdx >= this.petalData.length) pIdx = 0;
 
     const touchedPetal = this.petalData[pIdx];
     touchedPetal.touchGlow = 1.0;
-    touchedPetal.swayAmp = 0.16;
-    touchedPetal.swayPhase = 0.0;
+    touchedPetal.flexOffset = 0.08; // Slight radial outward spring yield
 
     // Sympathetic ripple on adjacent petals in the same tier
     const tierPetals = this.petalData.filter((p) => p.tier === touchedPetal.tier);
@@ -734,13 +727,12 @@ export class GlowingFlower {
       const prev = tierPetals[(localTierIdx - 1 + tierPetals.length) % tierPetals.length];
       const next = tierPetals[(localTierIdx + 1) % tierPetals.length];
       prev.touchGlow = Math.max(prev.touchGlow, 0.45);
-      prev.swayAmp = Math.max(prev.swayAmp, 0.08);
+      prev.flexOffset = Math.max(prev.flexOffset, 0.03);
       next.touchGlow = Math.max(next.touchGlow, 0.45);
-      next.swayAmp = Math.max(next.swayAmp, 0.08);
+      next.flexOffset = Math.max(next.flexOffset, 0.03);
     }
 
-    // Emit sparkling stardust burst at the touched petal's tip
-    this.emitSparkleBurst(touchedPetal.worldTip, 16, 1.2);
+    this.emitSparkleBurst(touchedPetal.worldTip, 14, 1.1);
 
     // Debounce to allow clean, responsive toggling without multi-frame stutter
     this.touchCooldownRemaining = 0.55;
@@ -772,14 +764,13 @@ export class GlowingFlower {
       this.touchCooldownRemaining -= deltaSec;
     }
 
-    // Auto-capture world if passed
     if (world && !this.xrWorld) {
       this.xrWorld = world;
       const session = (world.renderer as any)?.xr?.getSession() || (world as any).session;
       if (session) this.bindXRSession(session);
     }
 
-    // 1. Spawning / Arrival phase (58s -> 65s)
+    // 1. Spawning / Swooping Arrival (58s -> 65s)
     if (relativeTime >= FLOWER_TIMELINE.t_spawn && relativeTime < FLOWER_TIMELINE.t_arrival) {
       if (!this.isSpawned) {
         this.isSpawned = true;
@@ -800,6 +791,7 @@ export class GlowingFlower {
         .addScaledVector(this.targetFocalPos, easeT * easeT);
 
       this.flowerRoot.position.copy(this.scratchCurrentPos);
+      this.flowerRoot.rotation.set(0, 0, 0);
 
       const scale = Math.min(1.0, 0.2 + easeT * 0.8);
       this.flowerRoot.scale.set(scale, scale, scale);
@@ -807,17 +799,11 @@ export class GlowingFlower {
       this.updateTrail(this.scratchCurrentPos, easeT);
     }
     // 2. Active Interactive Phase 2 Window (65s -> 165s)
+    // Flower remains COMPLETELY STATIONARY — no whole-object rotation, sway, or bobbing!
     else if (relativeTime >= FLOWER_TIMELINE.t_arrival && relativeTime <= FLOWER_TIMELINE.t_touch_window_end) {
       this.group.visible = true;
       this.flowerRoot.position.copy(this.targetFocalPos);
-
-      // Subtle living hover bobbing
-      const hoverOffset = Math.sin(relativeTime * 1.6) * 0.012;
-      this.flowerRoot.position.y = this.targetFocalPos.y + hoverOffset;
-
-      // Gentle continuous axial rotation
-      this.flowerRoot.rotation.y += deltaSec * 0.20;
-
+      this.flowerRoot.rotation.set(0, 0, 0);
       this.trailPoints.visible = false;
     }
     // 3. Cosmic Ascent Transition (165s -> 175s)
@@ -841,17 +827,24 @@ export class GlowingFlower {
 
     // 4. Smooth Organic Blooming Interpolation (critically damped spring)
     const prevBloom = this.bloomProgress;
-    const bloomSpringSpeed = 2.8;
-    this.bloomProgress += (this.targetBloom - this.bloomProgress) * (1.0 - Math.exp(-deltaSec * bloomSpringSpeed));
+    const bloomSpeed = 2.4;
+    this.bloomProgress += (this.targetBloom - this.bloomProgress) * (1.0 - Math.exp(-deltaSec * bloomSpeed));
     this.bloomVelocity = Math.abs(this.bloomProgress - prevBloom) / Math.max(0.001, deltaSec);
 
     // Audio reactivity
-    const mid = metrics ? metrics.mid : 0;
     const high = metrics ? metrics.high : 0;
     const energy = metrics ? metrics.overall : 0;
-    const breathe = 1.0 + Math.sin(relativeTime * 2.2) * 0.018 + energy * 0.035;
 
-    // 5. Compute each Petal's World Transform, Tip & Proximity
+    // 5. Sequential Radial Blooming Kinematics:
+    // Inner petals open FIRST (progress 0.0 -> 0.72)
+    // Outer petals open SECOND (progress 0.28 -> 1.0)
+    const b = this.bloomProgress;
+    const uInner = Math.max(0.0, Math.min(1.0, b / 0.72));
+    const smoothInner = uInner * uInner * (3.0 - 2.0 * uInner);
+
+    const uOuter = Math.max(0.0, Math.min(1.0, (b - 0.28) / (1.0 - 0.28)));
+    const smoothOuter = uOuter * uOuter * (3.0 - 2.0 * uOuter);
+
     this.flowerRoot.updateMatrixWorld();
 
     for (let i = 0; i < this.petalData.length; i++) {
@@ -859,33 +852,25 @@ export class GlowingFlower {
 
       // Smooth touch glow fadeout
       if (p.touchGlow > 0) {
-        p.touchGlow = Math.max(0, p.touchGlow - deltaSec * 1.6);
+        p.touchGlow = Math.max(0, p.touchGlow - deltaSec * 1.5);
       }
 
-      // Harmonic spring recoil decay
-      if (p.swayAmp > 0.001) {
-        p.swayPhase += deltaSec * 16.0;
-        p.swayAmp *= Math.exp(-deltaSec * 4.5);
+      // Radial flex spring decay
+      if (Math.abs(p.flexOffset) > 0.001) {
+        p.flexOffset += (0.0 - p.flexOffset) * (1.0 - Math.exp(-deltaSec * 5.0));
       } else {
-        p.swayAmp = 0;
+        p.flexOffset = 0.0;
       }
 
-      // Staggered blooming lag: outer petals open first; inner petals close first
-      let tierLag = p.tier === 0 ? 0.12 : 0.0;
-      if (!this.isBlooming) {
-        tierLag = p.tier === 1 ? 0.12 : 0.0;
-      }
-      const effectiveBloom = Math.max(0.0, Math.min(1.0, (this.bloomProgress - tierLag) / (1.0 - 0.12)));
+      // Compute individual radial tilt around base hinge
+      const smoothTier = p.tier === 0 ? smoothInner : smoothOuter;
+      const baseTilt = p.tiltClosed + (p.tiltOpen - p.tiltClosed) * smoothTier;
+      p.currentTilt = baseTilt + p.flexOffset;
 
-      // Interpolate tilt from closed upright to flared open
-      const baseTilt = p.tiltClosed + (p.tiltOpen - p.tiltClosed) * effectiveBloom;
-      const swayOffset = Math.sin(p.swayPhase) * p.swayAmp;
-      p.currentTilt = baseTilt + swayOffset;
+      // Pure radial rotation around individual base hinge!
+      p.hingeGroup.rotation.x = p.currentTilt;
 
-      p.mesh.rotation.x = p.currentTilt;
-      p.mesh.scale.set(breathe, breathe, breathe);
-
-      // Update world positions of tip & body for precise proximity
+      // Update world positions of tip & body for proximity and sparkles
       p.mesh.updateMatrixWorld();
       this.scratchVec.copy(p.localTip);
       p.mesh.localToWorld(this.scratchVec);
@@ -921,9 +906,8 @@ export class GlowingFlower {
     // 8. Dynamic Stardust Sparkle Emission During Blooming Motion
     if (this.bloomVelocity > 0.08) {
       this.sparkleEmissionTimer += deltaSec;
-      if (this.sparkleEmissionTimer >= 0.08) {
+      if (this.sparkleEmissionTimer >= 0.09) {
         this.sparkleEmissionTimer = 0.0;
-        // Pick a random outer petal tip to emit a delicate sparkle
         const randomPetal = this.petalData[Math.floor(Math.random() * this.petalData.length)];
         this.emitSparkleBurst(randomPetal.worldTip, 3, 0.6);
       }
@@ -993,12 +977,11 @@ export class GlowingFlower {
     let closestTouchedPetal: PetalData | null = null;
     let minTouchDist = Infinity;
 
-    // Evaluate proximity on each petal
     for (let i = 0; i < this.petalData.length; i++) {
       const petal = this.petalData[i];
       let targetHover = 0.0;
 
-      // 1. Physical finger / controller probe test
+      // 1. Physical probe test
       for (let k = 0; k < probePoints.length; k++) {
         const probe = probePoints[k];
         const distToTip = probe.pos.distanceTo(petal.worldTip);
@@ -1035,11 +1018,9 @@ export class GlowingFlower {
         }
       }
 
-      // Smooth hover intensity transition
       petal.hoverIntensity += (targetHover - petal.hoverIntensity) * 0.25;
     }
 
-    // Direct touch trigger on the closest petal
     if (closestTouchedPetal) {
       this.triggerTouch(closestTouchedPetal.index);
     }
@@ -1082,7 +1063,7 @@ export class GlowingFlower {
       if (projection > 0 && projection < 3.5) {
         this.scratchClosestPoint.copy(rayOrigin).addScaledVector(rayDir, projection);
         const dist = this.scratchClosestPoint.distanceTo(petal.worldCenter);
-        const hitRadius = petal.width * 1.2;
+        const hitRadius = petal.width * 1.3;
 
         if (dist < hitRadius && projection < closestDist) {
           closestDist = projection;
@@ -1205,7 +1186,6 @@ export class GlowingFlower {
       if (ctx.state === 'suspended') ctx.resume();
 
       const now = ctx.currentTime;
-      // Radiant crystal bell chords (pentatonic F# / G# / C# sparkle)
       const freqs = this.isBlooming ? [880, 1174, 1760] : [1760, 1174, 880];
 
       freqs.forEach((freq, idx) => {
@@ -1241,26 +1221,26 @@ export class GlowingFlower {
   reset(): void {
     this.isSpawned = false;
     this.isBlooming = false;
-    this.bloomProgress = 0.15;
-    this.targetBloom = 0.15;
+    this.bloomProgress = 0.0;
+    this.targetBloom = 0.0;
     this.bloomVelocity = 0.0;
     this.touchCooldownRemaining = 0.0;
     this.group.visible = false;
     this.flowerRoot.scale.set(0.001, 0.001, 0.001);
     this.flowerRoot.position.copy(this.spawnOriginPos);
+    this.flowerRoot.rotation.set(0, 0, 0);
 
     for (let i = 0; i < this.petalData.length; i++) {
       const p = this.petalData[i];
       p.currentTilt = p.tiltClosed;
-      p.mesh.rotation.x = p.tiltClosed;
+      p.hingeGroup.rotation.x = p.tiltClosed;
       p.hoverIntensity = 0.0;
       p.touchGlow = 0.0;
-      p.swayAmp = 0.0;
-      p.swayPhase = 0.0;
+      p.flexOffset = 0.0;
       p.mat.uniforms.uOpacity.value = 0.90;
       p.mat.uniforms.uTouchGlow.value = 0.0;
       p.mat.uniforms.uHover.value = 0.0;
-      p.mat.uniforms.uBloomProgress.value = 0.15;
+      p.mat.uniforms.uBloomProgress.value = 0.0;
     }
 
     for (let p = 0; p < this.maxSparkles; p++) {
