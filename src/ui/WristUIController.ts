@@ -1,60 +1,48 @@
 /**
- * WristUIController: Dual 3D Spatial Holographic Music Interface Manager.
+ * WristUIController: Single 3D Holographic Music Interface Manager.
  *
- * Orchestrates two synchronized 3D panels:
- *  1. FloatingMusicPlayer:
- *     - Main 3D translucent glass music player with neon-cyan edge glow,
- *       fine silver circuit rings, and gold accents.
- *     - Positioned 45–60 cm in front of the seated user, slightly below eye level.
- *     - Offset to the right by default so the Crystal Lotus and cosmic horizon
- *       remain 100% visible and unblocked.
- *     - Includes top handle for effortless 3D drag repositioning.
- *     - Full controls: Hero Play/Pause, Rewind 10s, Forward 10s, Volume step/gauge,
- *       Loop toggle, Close, Circular Progress Ring and digital time readout.
- *  2. WristControlPanel (WristUI):
- *     - Compact 3D holographic panel mounted naturally to left wrist in XR
- *       (or bottom-left HUD in desktop mode).
- *     - Compact essential controls: Play/Pause, Rewind, Forward, Volume, Loop, Expand/HUD.
- *     - Smoothly opens and closes.
+ * Orchestrates ONE sculptural 3D holographic music control interface
+ * (FloatingMusicPlayer), cleanly replacing the old dual/wrist panel design.
  *
  * Ergonomics & Input:
- *  - Both Meta Quest 3S hand tracking (index fingertip poke with 2.2mm depression)
- *    and both controllers (raycast pointer trigger + physical poke).
- *  - Full desktop compatibility (mouse click, hover, drag handle repositioning,
- *    Tab toggle, Space play/pause, M toggle floating player).
- *  - Zero per-frame allocations, optimized for 72-90 fps on Meta Quest 3S.
+ *  - Positioned 45-60 cm in front of the seated user, slightly below eye level,
+ *    offset to keep the Crystal Lotus and key visuals unobstructed.
+ *  - Supports Meta Quest 3S hand tracking (index fingertip poke & pinch ray),
+ *    both controllers (ray targeting + trigger + physical touch), and desktop
+ *    mouse hover/click/drag.
+ *  - Subtle glowing hover feedback whenever a hand, controller ray, or mouse
+ *    targets any control.
+ *  - Zero per-frame heap allocations; optimized for 72-90 fps on Meta Quest 3S.
  */
 
 import {
-  Group,
   Camera,
+  Mesh,
+  MeshBasicMaterial,
+  OctahedronGeometry,
   Raycaster,
   Vector2,
   Vector3,
-  Mesh,
-  SphereGeometry,
-  MeshBasicMaterial,
   Color,
 } from '@iwsdk/core';
 import type { World } from '@iwsdk/core';
-import { WristUI, InteractiveControlId } from './WristUI.js';
 import { FloatingMusicPlayer, FloatingControlId } from './FloatingMusicPlayer.js';
-import { WRIST_UI_DIMENSIONS, MUSIC_UI_PALETTE } from './WristUIStyles.js';
+import { MUSIC_UI_PALETTE } from './WristUIStyles.js';
 import { ExperiencePhase, XRLifecycleState } from '../app/ExperienceState.js';
 import { interactionDebugState } from '../interaction/InteractionDebugState.js';
 
-export interface WristUIDependencies {
+export interface MusicUIDependencies {
   audio: {
     play: () => Promise<void>;
-    resume: () => void;
+    playOrResume?: () => Promise<void>;
+    resume: () => void | Promise<void>;
     pause: () => void;
+    skipToEnd?: () => void;
     getCurrentTime: () => number;
     isPlaying: () => boolean;
     seekRelative?: (deltaSec: number) => void;
     setVolume?: (v: number) => void;
     getVolume?: () => number;
-    toggleLoop?: () => boolean;
-    isLooping?: () => boolean;
   };
   excerpt: {
     sourceStart: number;
@@ -69,82 +57,88 @@ export interface WristUIDependencies {
   replay: () => void;
   world?: World;
   camera?: Camera;
+  getAudioIntensity?: () => number;
 }
 
+export type WristUIDependencies = MusicUIDependencies;
+
 export class WristUIController {
-  private wristUI: WristUI | null = null;
   private floatingPlayer: FloatingMusicPlayer | null = null;
-  private deps: WristUIDependencies | null = null;
+  private deps: MusicUIDependencies | null = null;
 
-  // Root container for wrist panel
-  private readonly wristRootGroup: Group = new Group();
-
-  private currentWristParent: Camera | Group | null = null;
   private isXRActive = false;
-
-  // Audio state
+  private needsInitialXRPlacement = false;
   private _volume = 1.0;
-  private _isLooping = false;
 
-  // XR Poke Activation on wrist
-  private pokeAnchorMesh: Mesh | null = null;
-  private pokeAnchorRadius = 0.055;
-  private pokeCooldownRemaining = 0;
-  private wasInsidePokeZone = false;
+  // Minimal wrist summon star-crystal: ONLY visible in XR after user clicks Close (X)
+  private summonBeaconMesh: Mesh | null = null;
+  private summonCooldown = 0;
 
-  // Button touch debounce
+  // Touch & hover state
   private touchCooldown = 0;
+  private wasInTouchZone = false;
+  private desktopHoveredId: FloatingControlId | null = null;
+  private targetedIds: Set<FloatingControlId> = new Set();
+  private hitTestObjects: Mesh[] = [];
+  private hitTestEntries: { mesh: Mesh; id: FloatingControlId }[] = [];
 
   // Repositioning drag state
   private isDraggingPlayer = false;
-  private dragPlaneDistance = 0.52;
   private lastMouseX = 0;
   private lastMouseY = 0;
-  private dragOffset = new Vector3();
 
-  // Desktop integration
+  // Gamepad button edge detection for reopening closed UI in VR
+  private prevSummonBtnLeft = false;
+  private prevSummonBtnRight = false;
+
+  // Listeners & DOM
   private domToggleButton: HTMLButtonElement | null = null;
   private boundOnKeyDown: ((e: KeyboardEvent) => void) | null = null;
   private boundOnPointerDown: ((e: PointerEvent) => void) | null = null;
   private boundOnPointerMove: ((e: PointerEvent) => void) | null = null;
   private boundOnPointerUp: ((e: PointerEvent) => void) | null = null;
+  private boundOnXRSelect: ((e: Event) => void) | null = null;
   private unsubscribeXR: (() => void) | null = null;
   private unsubscribePhase: (() => void) | null = null;
-
-  // Raycasting
-  private raycaster: Raycaster = new Raycaster();
-  private pointer: Vector2 = new Vector2();
-  private boundOnXRSelect: ((e: Event) => void) | null = null;
   private xrSession: XRSession | null = null;
 
-  // Scratch vectors for zero allocation
-  private scratchWristWorldPos = new Vector3();
-  private scratchPokingWorldPos = new Vector3();
+  // Pre-allocated scratch objects (zero per-frame heap allocations)
+  private raycaster: Raycaster = new Raycaster();
+  private pointer: Vector2 = new Vector2();
   private scratchHeadPos = new Vector3();
   private scratchForward = new Vector3();
   private scratchButtonPos = new Vector3();
+  private scratchBeaconPos = new Vector3();
+  private scratchProbePositions: Vector3[] = [
+    new Vector3(),
+    new Vector3(),
+    new Vector3(),
+    new Vector3(),
+  ];
+  private scratchProbeCount = 0;
+  private scratchRayOrigin = new Vector3();
+  private scratchRayDir = new Vector3();
   private audioCtx: AudioContext | null = null;
 
-  init(deps: WristUIDependencies): void {
+  init(deps: MusicUIDependencies): void {
     this.deps = deps;
 
-    // 1. Create Compact 3D Wrist Panel
-    this.wristUI = new WristUI(this.wristRootGroup);
-
-    // 2. Create Main 3D Floating Glass Music Player
+    // Create the SINGLE 3D Holographic Music Interface
     this.floatingPlayer = new FloatingMusicPlayer();
 
-    // Add floating player to the scene world so it floats comfortably in 3D
     const worldScene = deps.world?.scene;
     if (worldScene) {
       worldScene.add(this.floatingPlayer.group);
     } else {
-      // Fallback: camera space
       deps.camera?.add(this.floatingPlayer.group);
     }
 
+    // Cache hit-test mesh list cleanly
+    this.hitTestEntries = this.floatingPlayer.getHitTestMeshes();
+    this.hitTestObjects = this.hitTestEntries.map((entry) => entry.mesh);
+
     this.setupDesktopMounting();
-    this.setupKeyboardShortcut();
+    this.setupKeyboardShortcuts();
     this.setupDesktopDOMButton();
     this.setupDesktopPointerHandlers();
 
@@ -161,17 +155,16 @@ export class WristUIController {
       });
     }
 
-    this.unsubscribePhase = deps.state.subscribePhase((phase) => {
-      this.wristUI?.updateStatus(phase);
+    this.unsubscribePhase = deps.state.subscribePhase(() => {
+      // Progress pill updates dynamically inside update()
     });
-    this.wristUI.updateStatus(deps.state.getCurrentPhase());
 
-    console.log('[WristUIController] Initialized Dual 3D Spatial Interface (Floating Player + Wrist Panel)');
+    console.log('[MusicUIController] Initialized Single 3D Holographic Interface');
   }
 
-  getUI(): WristUI | null { return this.wristUI; }
-  getFloatingPlayer(): FloatingMusicPlayer | null { return this.floatingPlayer; }
-  getGroup(): Group { return this.wristRootGroup; }
+  getFloatingPlayer(): FloatingMusicPlayer | null {
+    return this.floatingPlayer;
+  }
 
   // ─── XR Mounting ───────────────────────────────────────────────────────────
 
@@ -186,47 +179,35 @@ export class WristUIController {
   private onXRActive(explicitSession?: XRSession): void {
     this.isXRActive = true;
     const world = this.deps?.world;
-    if (world) {
-      const leftGrip = world.player.gripSpaces.left;
-      if (this.currentWristParent) this.currentWristParent.remove(this.wristRootGroup);
-      leftGrip.add(this.wristRootGroup);
-      this.currentWristParent = leftGrip;
-
-      // Mount compact panel on inner left wrist
-      this.wristRootGroup.position.set(0, WRIST_UI_DIMENSIONS.wristOffset, 0);
-      this.wristRootGroup.rotation.set(-Math.PI * 0.5, 0, 0);
-
-      // Re-parent floating player to world scene so it floats freely in room/seated space
-      if (this.floatingPlayer) {
-        if (this.floatingPlayer.group.parent) {
-          this.floatingPlayer.group.parent.remove(this.floatingPlayer.group);
-        }
-        world.scene.add(this.floatingPlayer.group);
-
-        // Place 52 cm in front of seated user, chest level, offset right to protect lotus view
-        this.updateHeadPos();
-        this.floatingPlayer.resetPosition(this.scratchHeadPos, this.scratchForward);
+    if (world && this.floatingPlayer) {
+      if (this.floatingPlayer.group.parent) {
+        this.floatingPlayer.group.parent.remove(this.floatingPlayer.group);
       }
+      world.scene.add(this.floatingPlayer.group);
 
-      if (!this.pokeAnchorMesh) {
-        const sphereGeo = new SphereGeometry(this.pokeAnchorRadius, 16, 16);
-        const sphereMat = new MeshBasicMaterial({
-          color: MUSIC_UI_PALETTE.borderCyan,
-          wireframe: true,
+      // Position 50 cm in front of seated user, chest level, offset right so lotus is clear
+      this.updateHeadPos();
+      this.floatingPlayer.resetPosition(this.scratchHeadPos, this.scratchForward);
+      this.needsInitialXRPlacement = true;
+
+      // Subtle tiny summon crystal ONLY shown on left wrist if user closes the main UI
+      if (!this.summonBeaconMesh) {
+        const geo = new OctahedronGeometry(0.011, 0);
+        geo.scale(0.8, 1.3, 0.8);
+        const mat = new MeshBasicMaterial({
+          color: new Color(MUSIC_UI_PALETTE.borderCyan),
           transparent: true,
-          opacity: 0.25,
-          depthWrite: false,
+          opacity: 0.78,
         });
-        this.pokeAnchorMesh = new Mesh(sphereGeo, sphereMat);
-        this.pokeAnchorMesh.name = 'wrist-poke-anchor';
-        this.pokeAnchorMesh.position.set(0, 0.04, 0);
-        leftGrip.add(this.pokeAnchorMesh);
-      } else {
-        leftGrip.add(this.pokeAnchorMesh);
+        this.summonBeaconMesh = new Mesh(geo, mat);
+        this.summonBeaconMesh.name = 'HoloUI_SummonBeacon';
+        this.summonBeaconMesh.position.set(0, 0.055, 0);
       }
+      this.summonBeaconMesh.visible = !this.floatingPlayer.visible;
+      world.player.gripSpaces.left.add(this.summonBeaconMesh);
     }
 
-    interactionDebugState.set({ wristActivationZoneExists: true });
+    interactionDebugState.set({ wristActivationZoneExists: false });
 
     const session = explicitSession || this.deps?.world?.session || (this.deps?.world?.renderer as any)?.xr?.getSession();
     if (session && !this.boundOnXRSelect) {
@@ -235,20 +216,15 @@ export class WristUIController {
       this.xrSession = session;
     }
 
-    console.log('[WristUIController] Dual 3D Interface active in WebXR');
+    console.log('[MusicUIController] Single 3D Holographic Interface active in WebXR');
   }
 
   private onXREnded(): void {
     this.isXRActive = false;
 
-    if (this.pokeAnchorMesh?.parent) {
-      this.pokeAnchorMesh.parent.remove(this.pokeAnchorMesh);
+    if (this.summonBeaconMesh?.parent) {
+      this.summonBeaconMesh.parent.remove(this.summonBeaconMesh);
     }
-
-    interactionDebugState.set({
-      wristActivationZoneExists: false,
-      lastWristPokeDetected: false,
-    });
 
     if (this.xrSession && this.boundOnXRSelect) {
       this.xrSession.removeEventListener('selectstart', this.boundOnXRSelect);
@@ -257,152 +233,150 @@ export class WristUIController {
     }
 
     this.setupDesktopMounting();
-    console.log('[WristUIController] WebXR ended — reverted to desktop mode');
   }
 
   // ─── Desktop Mounting ──────────────────────────────────────────────────────
 
   private setupDesktopMounting(): void {
     const camera = this.deps?.camera || this.deps?.world?.camera;
-    if (camera) {
-      if (this.currentWristParent) this.currentWristParent.remove(this.wristRootGroup);
-      camera.add(this.wristRootGroup);
-      this.currentWristParent = camera;
-
-      // Position wrist panel subtly at bottom-left in desktop view
-      this.wristRootGroup.position.set(-0.16, -0.10, -WRIST_UI_DIMENSIONS.desktopDistance);
-      this.wristRootGroup.rotation.set(0, 0.15, 0);
-
-      // Position floating player at bottom-right in desktop view (unobstructed center)
-      if (this.floatingPlayer) {
-        if (this.floatingPlayer.group.parent) {
-          this.floatingPlayer.group.parent.remove(this.floatingPlayer.group);
-        }
-        camera.add(this.floatingPlayer.group);
-        this.floatingPlayer.group.position.set(0.18, -0.05, -0.52);
-        this.floatingPlayer.group.rotation.set(-0.04, -0.18, 0);
+    if (camera && this.floatingPlayer) {
+      if (this.floatingPlayer.group.parent) {
+        this.floatingPlayer.group.parent.remove(this.floatingPlayer.group);
       }
+      camera.add(this.floatingPlayer.group);
+      this.floatingPlayer.group.position.set(0.23, -0.09, -0.52);
+      this.floatingPlayer.group.rotation.set(-0.06, -0.24, 0);
     }
   }
 
   // ─── Keyboard Shortcuts ────────────────────────────────────────────────────
 
-  private setupKeyboardShortcut(): void {
+  private setupKeyboardShortcuts(): void {
     this.boundOnKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Tab') {
-        e.preventDefault();
-        this.wristUI?.toggle();
-      } else if (e.code === 'KeyM') {
+      if (e.code === 'Tab' || e.code === 'KeyM') {
         e.preventDefault();
         this.floatingPlayer?.toggle();
+        this.syncDOMToggleLabel();
       } else if (e.code === 'Space') {
         e.preventDefault();
-        this.handleButtonAction('playPause');
+        this.handleControlAction('playPause');
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
-        this.handleButtonAction('rewind');
+        this.handleControlAction('rewind');
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
-        this.handleButtonAction('forward');
+        this.handleControlAction('forward');
       } else if (e.code === 'ArrowUp') {
         e.preventDefault();
-        this.handleButtonAction('volUp');
+        this.adjustVolume(0.25);
       } else if (e.code === 'ArrowDown') {
         e.preventDefault();
-        this.handleButtonAction('volDown');
-      } else if (e.code === 'KeyL') {
-        e.preventDefault();
-        this.handleButtonAction('loop');
+        this.adjustVolume(-0.25);
       }
     };
     window.addEventListener('keydown', this.boundOnKeyDown);
   }
 
-  // ─── Desktop Pointer Click & Drag Repositioning ────────────────────────────
+  // ─── Desktop Pointer Hover, Click & Drag (Capture Phase) ───────────────────
 
   private setupDesktopPointerHandlers(): void {
     this.boundOnPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0) return; // Only left click
+      if (e.button !== 0 || !this.floatingPlayer?.visible) return;
       const canvas = document.querySelector('canvas');
-      if (!canvas) return;
+      if (!canvas || e.target !== canvas) return;
+
       const rect = canvas.getBoundingClientRect();
       this.pointer.set(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
       );
+
       const camera = this.deps?.camera || this.deps?.world?.camera;
       if (!camera) return;
+
       this.raycaster.setFromCamera(this.pointer, camera);
-
-      // 1. Check Floating Music Player (buttons and handle)
-      if (this.floatingPlayer?.visible) {
-        const hitMeshes = this.floatingPlayer.getHitTestMeshes();
-        const objects = hitMeshes.map((h) => h.mesh);
-        const hits = this.raycaster.intersectObjects(objects, false);
-        if (hits.length > 0) {
-          const hitObj = hits[0].object as Mesh;
-          const found = hitMeshes.find((h) => h.mesh === hitObj);
-          if (found) {
-            if (found.id === 'handle') {
-              // Start dragging floating player
-              this.isDraggingPlayer = true;
-              this.lastMouseX = e.clientX;
-              this.lastMouseY = e.clientY;
-              e.stopPropagation();
-              return;
-            } else {
-              this.floatingPlayer.depressButton(found.id);
-              this.handleButtonAction(found.id as any);
-              setTimeout(() => this.floatingPlayer?.releaseButton(found.id), 180);
-              e.stopPropagation();
-              return;
-            }
-          }
-        }
-      }
-
-      // 2. Check Wrist Panel (when open)
-      if (this.wristUI?.isOpen) {
-        const hitMeshes = this.wristUI.getHitTestMeshes();
-        const objects = hitMeshes.map((h) => h.mesh);
-        const hits = this.raycaster.intersectObjects(objects, false);
-        if (hits.length > 0) {
-          const found = hitMeshes.find((h) => h.mesh === hits[0].object);
-          if (found) {
-            this.handleButtonAction(found.id);
-            e.stopPropagation();
-            return;
+      const hits = this.raycaster.intersectObjects(this.hitTestObjects, false);
+      if (hits.length > 0) {
+        const hitObj = hits[0].object as Mesh;
+        const found = this.hitTestEntries.find((entry) => entry.mesh === hitObj);
+        if (found) {
+          e.stopPropagation();
+          if (found.id === 'handle') {
+            this.isDraggingPlayer = true;
+            this.lastMouseX = e.clientX;
+            this.lastMouseY = e.clientY;
+            canvas.style.cursor = 'grabbing';
+          } else {
+            this.floatingPlayer.depressButton(found.id);
+            this.handleControlAction(found.id);
+            setTimeout(() => this.floatingPlayer?.releaseButton(found.id), 180);
           }
         }
       }
     };
 
     this.boundOnPointerMove = (e: PointerEvent) => {
-      if (!this.isDraggingPlayer || !this.floatingPlayer) return;
-      const deltaX = e.clientX - this.lastMouseX;
-      const deltaY = e.clientY - this.lastMouseY;
-      this.lastMouseX = e.clientX;
-      this.lastMouseY = e.clientY;
+      if (!this.floatingPlayer?.visible) {
+        this.desktopHoveredId = null;
+        return;
+      }
 
-      // Translate floating player in camera/world space
-      this.floatingPlayer.group.position.x += deltaX * 0.0018;
-      this.floatingPlayer.group.position.y -= deltaY * 0.0018;
+      if (this.isDraggingPlayer) {
+        const deltaX = e.clientX - this.lastMouseX;
+        const deltaY = e.clientY - this.lastMouseY;
+        this.lastMouseX = e.clientX;
+        this.lastMouseY = e.clientY;
+
+        this.floatingPlayer.group.position.x += deltaX * 0.0016;
+        this.floatingPlayer.group.position.y -= deltaY * 0.0016;
+        e.stopPropagation();
+        return;
+      }
+
+      const canvas = document.querySelector('canvas');
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      this.pointer.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      const camera = this.deps?.camera || this.deps?.world?.camera;
+      if (!camera) return;
+
+      this.raycaster.setFromCamera(this.pointer, camera);
+      const hits = this.raycaster.intersectObjects(this.hitTestObjects, false);
+      if (hits.length > 0) {
+        const hitObj = hits[0].object as Mesh;
+        const found = this.hitTestEntries.find((entry) => entry.mesh === hitObj);
+        this.desktopHoveredId = found ? found.id : null;
+        canvas.style.cursor = found?.id === 'handle' ? 'grab' : 'pointer';
+      } else {
+        if (this.desktopHoveredId !== null) {
+          canvas.style.cursor = '';
+        }
+        this.desktopHoveredId = null;
+      }
     };
 
     this.boundOnPointerUp = () => {
-      this.isDraggingPlayer = false;
+      if (this.isDraggingPlayer) {
+        this.isDraggingPlayer = false;
+        const canvas = document.querySelector('canvas');
+        if (canvas) canvas.style.cursor = '';
+      }
     };
 
-    window.addEventListener('pointerdown', this.boundOnPointerDown);
+    window.addEventListener('pointerdown', this.boundOnPointerDown, { capture: true });
     window.addEventListener('pointermove', this.boundOnPointerMove);
     window.addEventListener('pointerup', this.boundOnPointerUp);
   }
 
-  // ─── WebXR Select Handler (Trigger / Pinch Raycast) ─────────────────────────
+  // ─── WebXR Select Handler (Controller Trigger & Hand Tracking Pinch) ──────
 
   private handleXRSelect(e: XRInputSourceEvent): void {
     const world = this.deps?.world;
-    if (!world) return;
+    if (!world || !this.floatingPlayer) return;
 
     const handedness = (e.inputSource.handedness as 'left' | 'right') || 'right';
     const raySpace = handedness === 'left' ? world.player.raySpaces.left : world.player.raySpaces.right;
@@ -412,45 +386,37 @@ export class WristUIController {
     this.raycaster.ray.origin.setFromMatrixPosition(raySpace.matrixWorld);
     this.raycaster.ray.direction.set(0, 0, -1).transformDirection(raySpace.matrixWorld).normalize();
 
-    // 1. Check Floating Player
-    if (this.floatingPlayer?.visible) {
-      const hitMeshes = this.floatingPlayer.getHitTestMeshes();
-      const objects = hitMeshes.map((h) => h.mesh);
-      const hits = this.raycaster.intersectObjects(objects, false);
-      if (hits.length > 0) {
-        const found = hitMeshes.find((h) => h.mesh === hits[0].object);
-        if (found) {
-          if (found.id === 'handle') {
-            // Reposition player toward ray intersection point
-            this.updateHeadPos();
-            this.floatingPlayer.setRepositionPosition(hits[0].point, this.scratchHeadPos);
-          } else {
-            this.floatingPlayer.depressButton(found.id);
-            this.handleButtonAction(found.id as any);
-            setTimeout(() => this.floatingPlayer?.releaseButton(found.id), 180);
-          }
-          return;
+    if (!this.floatingPlayer.visible) {
+      // Allow pointing & pinching/selecting the wrist summon crystal to reopen
+      if (this.summonBeaconMesh?.visible) {
+        const beaconHits = this.raycaster.intersectObject(this.summonBeaconMesh, false);
+        if (beaconHits.length > 0) {
+          this.summonUI();
         }
       }
+      return;
     }
 
-    // 2. Check Wrist Panel
-    if (this.wristUI?.isOpen) {
-      const hitMeshes = this.wristUI.getHitTestMeshes();
-      const objects = hitMeshes.map((h) => h.mesh);
-      const hits = this.raycaster.intersectObjects(objects, false);
-      if (hits.length > 0) {
-        const found = hitMeshes.find((h) => h.mesh === hits[0].object);
-        if (found) {
-          this.handleButtonAction(found.id);
+    const hits = this.raycaster.intersectObjects(this.hitTestObjects, false);
+    if (hits.length > 0) {
+      const hitObj = hits[0].object as Mesh;
+      const found = this.hitTestEntries.find((entry) => entry.mesh === hitObj);
+      if (found) {
+        if (found.id === 'handle') {
+          this.updateHeadPos();
+          this.floatingPlayer.setRepositionPosition(hits[0].point, this.scratchHeadPos);
+        } else {
+          this.floatingPlayer.depressButton(found.id);
+          this.handleControlAction(found.id);
+          setTimeout(() => this.floatingPlayer?.releaseButton(found.id), 180);
         }
       }
     }
   }
 
-  // ─── Unified Action Dispatcher (Syncs Both Panels) ─────────────────────────
+  // ─── Control Action Dispatcher ─────────────────────────────────────────────
 
-  private handleButtonAction(id: InteractiveControlId | 'volume'): void {
+  private handleControlAction(id: FloatingControlId): void {
     const deps = this.deps;
     if (!deps) return;
 
@@ -460,62 +426,14 @@ export class WristUIController {
       case 'playPause': {
         if (deps.audio.isPlaying()) {
           deps.audio.pause();
-        } else {
-          deps.audio.resume();
-          deps.audio.play().catch((err: unknown) => {
-            console.warn('[WristUIController] play() failed:', err);
+        } else if (deps.audio.playOrResume) {
+          deps.audio.playOrResume().catch((err: unknown) => {
+            console.warn('[MusicUIController] playOrResume() failed:', err);
           });
-        }
-        break;
-      }
-
-      case 'rewind': {
-        if (deps.audio.seekRelative) deps.audio.seekRelative(-10);
-        break;
-      }
-
-      case 'forward': {
-        if (deps.audio.seekRelative) deps.audio.seekRelative(10);
-        break;
-      }
-
-      case 'volume':
-      case 'volUp': {
-        // Step volume: 1.0 -> 0.75 -> 0.50 -> 0.25 -> 0.0 -> 1.0
-        if (this._volume > 0.85) this._volume = 0.75;
-        else if (this._volume > 0.60) this._volume = 0.50;
-        else if (this._volume > 0.35) this._volume = 0.25;
-        else if (this._volume > 0.10) this._volume = 0.0;
-        else this._volume = 1.0;
-
-        if (deps.audio.setVolume) deps.audio.setVolume(this._volume);
-        this.floatingPlayer?.updateVolume(this._volume);
-        break;
-      }
-
-      case 'volDown': {
-        this._volume = Math.max(0.0, this._volume - 0.20);
-        if (deps.audio.setVolume) deps.audio.setVolume(this._volume);
-        this.floatingPlayer?.updateVolume(this._volume);
-        break;
-      }
-
-      case 'loop': {
-        if (deps.audio.toggleLoop) {
-          this._isLooping = deps.audio.toggleLoop();
         } else {
-          this._isLooping = !this._isLooping;
-        }
-        this.floatingPlayer?.updateLoop(this._isLooping);
-        break;
-      }
-
-      case 'expand': {
-        // Summon or focus main floating player in front of user
-        if (this.floatingPlayer) {
-          this.floatingPlayer.open();
-          this.updateHeadPos();
-          this.floatingPlayer.resetPosition(this.scratchHeadPos, this.scratchForward);
+          deps.audio.play().catch((err: unknown) => {
+            console.warn('[MusicUIController] play() failed:', err);
+          });
         }
         break;
       }
@@ -525,43 +443,86 @@ export class WristUIController {
         break;
       }
 
-      case 'close': {
-        // If floating player is open, close floating player; otherwise close wrist panel
-        if (this.floatingPlayer?.visible) {
-          this.floatingPlayer.close();
-        } else {
-          this.wristUI?.close();
+      case 'rewind': {
+        deps.audio.seekRelative?.(-10);
+        break;
+      }
+
+      case 'forward': {
+        deps.audio.seekRelative?.(10);
+        break;
+      }
+
+      case 'skipToEnd': {
+        if (deps.audio.skipToEnd) {
+          deps.audio.skipToEnd();
+        } else if (deps.audio.seekRelative) {
+          deps.audio.seekRelative(deps.excerpt.duration);
         }
+        break;
+      }
+
+      case 'volume': {
+        // Intuitive single-tap cycle: 100% -> 75% -> 50% -> 25% -> 0% -> 100%
+        if (this._volume > 0.85) this._volume = 0.75;
+        else if (this._volume > 0.60) this._volume = 0.50;
+        else if (this._volume > 0.35) this._volume = 0.25;
+        else if (this._volume > 0.10) this._volume = 0.0;
+        else this._volume = 1.0;
+
+        deps.audio.setVolume?.(this._volume);
+        this.floatingPlayer?.updateVolume(this._volume);
+        break;
+      }
+
+      case 'close': {
+        this.floatingPlayer?.close();
+        this.syncDOMToggleLabel();
         break;
       }
     }
   }
 
-  // ─── DOM Toggle Button ─────────────────────────────────────────────────────
+  private adjustVolume(delta: number): void {
+    this._volume = Math.max(0, Math.min(1, Math.round((this._volume + delta) * 100) / 100));
+    this.deps?.audio.setVolume?.(this._volume);
+    this.floatingPlayer?.updateVolume(this._volume);
+    this.playClickSound();
+  }
+
+  private summonUI(): void {
+    if (!this.floatingPlayer || this.summonCooldown > 0) return;
+    this.summonCooldown = 0.5;
+    this.playClickSound();
+    this.floatingPlayer.open();
+    if (this.isXRActive) {
+      this.updateHeadPos();
+      this.floatingPlayer.resetPosition(this.scratchHeadPos, this.scratchForward);
+    }
+    this.syncDOMToggleLabel();
+  }
+
+  // ─── Subtle Desktop Toggle Pill ────────────────────────────────────────────
 
   private setupDesktopDOMButton(): void {
     const btn = document.createElement('button');
     btn.id = 'wrist-ui-desktop-btn';
-    btn.setAttribute('aria-label', 'Toggle Dual 3D Music Interface');
-    btn.innerHTML = `
-      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.5px; color: #00f2fe;">Music Player</span>
-      <kbd style="margin-left: 8px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0,242,254,0.18); border: 1px solid rgba(0,242,254,0.40); color: #ffffff;">Tab</kbd>
-    `;
+    btn.setAttribute('aria-label', 'Toggle 3D Holographic Music Controls');
 
     Object.assign(btn.style, {
       position: 'fixed',
-      bottom: '24px',
-      left: '24px',
+      bottom: '20px',
+      left: '20px',
       zIndex: '999',
       display: 'flex',
       alignItems: 'center',
       padding: '8px 16px',
       borderRadius: '24px',
-      background: 'rgba(7, 17, 26, 0.90)',
+      background: 'rgba(10, 40, 62, 0.75)',
       backdropFilter: 'blur(12px)',
-      color: '#f5f0e8',
-      border: '1px solid rgba(0, 242, 254, 0.45)',
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 242, 254, 0.20)',
+      color: '#f4f9ff',
+      border: '1px solid rgba(0, 242, 254, 0.52)',
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.45), 0 0 14px rgba(0, 242, 254, 0.22)',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       fontSize: '13px',
       fontWeight: '600',
@@ -571,156 +532,217 @@ export class WristUIController {
     });
 
     btn.addEventListener('mouseenter', () => {
-      btn.style.background = 'rgba(11, 30, 44, 0.98)';
+      btn.style.background = 'rgba(15, 58, 86, 0.92)';
       btn.style.borderColor = '#00f2fe';
       btn.style.boxShadow = '0 6px 24px rgba(0, 242, 254, 0.35)';
-      btn.style.transform = 'translateY(-1px)';
     });
     btn.addEventListener('mouseleave', () => {
-      btn.style.background = 'rgba(7, 17, 26, 0.90)';
-      btn.style.borderColor = 'rgba(0, 242, 254, 0.45)';
-      btn.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 242, 254, 0.20)';
-      btn.style.transform = 'translateY(0)';
+      btn.style.background = 'rgba(10, 40, 62, 0.75)';
+      btn.style.borderColor = 'rgba(0, 242, 254, 0.52)';
+      btn.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.45), 0 0 14px rgba(0, 242, 254, 0.22)';
     });
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.wristUI?.toggle();
-      if (this.floatingPlayer && !this.floatingPlayer.visible) {
-        this.floatingPlayer.open();
-      }
+      this.floatingPlayer?.toggle();
+      this.syncDOMToggleLabel();
     });
 
     document.body.appendChild(btn);
     this.domToggleButton = btn;
+    this.syncDOMToggleLabel();
   }
 
-  // ─── Per-Frame Updates ─────────────────────────────────────────────────────
+  private syncDOMToggleLabel(): void {
+    if (!this.domToggleButton) return;
+    const isOpen = this.floatingPlayer ? this.floatingPlayer.visible : true;
+    const label = isOpen ? 'Hide Controls' : 'Show Music UI';
+    this.domToggleButton.innerHTML = `
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.4px; color: #00f2fe;">${label}</span>
+      <kbd style="margin-left: 8px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0,242,254,0.18); border: 1px solid rgba(0,242,254,0.40); color: #ffffff;">M</kbd>
+    `;
+  }
+
+  // ─── Per-Frame Updates (Zero Allocations) ──────────────────────────────────
 
   update(dt: number): void {
-    if (!this.deps) return;
+    if (!this.deps || !this.floatingPlayer) return;
 
-    if (this.touchCooldown > 0) {
-      this.touchCooldown -= dt;
-    }
+    if (this.touchCooldown > 0) this.touchCooldown -= dt;
+    if (this.summonCooldown > 0) this.summonCooldown -= dt;
 
     const { sourceStart, duration } = this.deps.excerpt;
     const rawTime = this.deps.audio.getCurrentTime();
     const pct = duration > 0 ? Math.max(0, Math.min(1, (rawTime - sourceStart) / duration)) : 0;
     const isPlaying = this.deps.audio.isPlaying();
-    const isLooping = this.deps.audio.isLooping ? this.deps.audio.isLooping() : this._isLooping;
+    const currentPhase = this.deps.state.getCurrentPhase();
 
-    // Time formatted string: mm:ss / mm:ss
     const currentSec = Math.max(0, rawTime - sourceStart);
     const timeStr = `${this.formatTime(currentSec)} / ${this.formatTime(duration)}`;
 
-    this.updateHeadPos();
+    let statusText = 'PAUSED';
+    if (currentPhase === 'COMPLETE') statusText = 'COMPLETE';
+    else if (isPlaying) statusText = 'PLAYING';
+    else if (currentPhase === 'READY') statusText = 'READY';
 
-    // 1. Update Floating Music Player
-    if (this.floatingPlayer) {
-      this.floatingPlayer.update(dt, this.scratchHeadPos);
-      this.floatingPlayer.updateProgress(pct, timeStr);
-      this.floatingPlayer.updatePlayState(isPlaying);
-      this.floatingPlayer.updateVolume(this._volume);
-      this.floatingPlayer.updateLoop(isLooping);
-    }
+    const audioIntensity = this.deps.getAudioIntensity ? this.deps.getAudioIntensity() : (isPlaying ? 0.5 : 0.1);
 
-    // 2. Update Wrist Panel
-    if (this.wristUI) {
-      this.wristUI.update(dt);
-      if (this.wristUI.isOpen) {
-        this.wristUI.updateProgress(pct);
-        this.wristUI.updatePlayState(isPlaying);
+    this.floatingPlayer.update(dt, audioIntensity);
+    this.floatingPlayer.updateProgress(pct, timeStr, statusText);
+    this.floatingPlayer.updatePlayState(isPlaying);
+    this.floatingPlayer.updateVolume(this._volume);
+
+    // Sync subtle XR summon beacon visibility (ONLY visible when main UI is closed)
+    if (this.summonBeaconMesh) {
+      this.summonBeaconMesh.visible = this.isXRActive && !this.floatingPlayer.visible;
+      if (this.summonBeaconMesh.visible) {
+        this.summonBeaconMesh.rotation.y += dt * 1.4;
       }
     }
 
-    // 3. WebXR Direct Physical Fingertip Poke & Touch Proximity
+    // Update hover/targeting glow & XR hand/controller interaction
+    this.targetedIds.clear();
+    if (this.desktopHoveredId) {
+      this.targetedIds.add(this.desktopHoveredId);
+    }
+
     if (this.isXRActive && this.deps.world) {
-      this.processXRFingerPoke();
+      if (this.needsInitialXRPlacement && (this.deps.world.renderer as any)?.xr?.isPresenting) {
+        this.needsInitialXRPlacement = false;
+        this.updateHeadPos();
+        this.floatingPlayer.resetPosition(this.scratchHeadPos, this.scratchForward);
+      }
+      this.processXRTargetingAndTouch();
+      this.checkXRGamepadSummon();
+    }
+
+    this.floatingPlayer.setTargetedControls(this.targetedIds);
+  }
+
+  private processXRTargetingAndTouch(): void {
+    if (!this.deps?.world || !this.floatingPlayer) return;
+    const p = this.deps.world.player as any;
+    if (!p) return;
+
+    // 1. Gather active hand index tips & controller grips into pre-allocated scratch vectors
+    this.scratchProbeCount = 0;
+
+    const addProbeIfActive = (space: any) => {
+      if (space && (space.visible || space.matrixWorld?.elements[15] > 0) && this.scratchProbeCount < 4) {
+        space.updateMatrixWorld();
+        this.scratchProbePositions[this.scratchProbeCount++].setFromMatrixPosition(space.matrixWorld);
+      }
+    };
+
+    addProbeIfActive(p.indexTipSpaces?.right);
+    addProbeIfActive(p.indexTipSpaces?.left);
+    addProbeIfActive(p.gripSpaces?.right);
+    addProbeIfActive(p.gripSpaces?.left);
+
+    // If UI is closed, allow direct physical poke of the tiny wrist beacon to summon
+    if (!this.floatingPlayer.visible) {
+      if (this.summonBeaconMesh?.visible && this.summonCooldown <= 0) {
+        this.summonBeaconMesh.updateMatrixWorld();
+        this.scratchBeaconPos.setFromMatrixPosition(this.summonBeaconMesh.matrixWorld);
+        for (let i = 0; i < this.scratchProbeCount; i++) {
+          if (this.scratchProbePositions[i].distanceTo(this.scratchBeaconPos) <= 0.055) {
+            this.summonUI();
+            return;
+          }
+        }
+      }
+      return;
+    }
+
+    // 2. Controller & Hand Pinch Ray Targeting Glow (Left & Right rays)
+    const checkRayHover = (raySpace: any) => {
+      if (!raySpace || (!raySpace.visible && !(raySpace.matrixWorld?.elements[15] > 0))) return;
+      raySpace.updateMatrixWorld();
+      this.scratchRayOrigin.setFromMatrixPosition(raySpace.matrixWorld);
+      this.scratchRayDir.set(0, 0, -1).transformDirection(raySpace.matrixWorld).normalize();
+      this.raycaster.ray.origin.copy(this.scratchRayOrigin);
+      this.raycaster.ray.direction.copy(this.scratchRayDir);
+
+      const hits = this.raycaster.intersectObjects(this.hitTestObjects, false);
+      if (hits.length > 0) {
+        const hitObj = hits[0].object as Mesh;
+        for (let j = 0; j < this.hitTestEntries.length; j++) {
+          if (this.hitTestEntries[j].mesh === hitObj) {
+            this.targetedIds.add(this.hitTestEntries[j].id);
+            break;
+          }
+        }
+      }
+    };
+
+    checkRayHover(p.raySpaces?.right);
+    checkRayHover(p.raySpaces?.left);
+
+    // 3. Hand & Controller Proximity Targeting + Direct Poke
+    let closestTouchId: FloatingControlId | null = null;
+    let closestTouchDist = Infinity;
+    let anyProbeInsideTouchRadius = false;
+
+    for (let j = 0; j < this.hitTestEntries.length; j++) {
+      const entry = this.hitTestEntries[j];
+      entry.mesh.updateMatrixWorld();
+      this.scratchButtonPos.setFromMatrixPosition(entry.mesh.matrixWorld);
+
+      for (let i = 0; i < this.scratchProbeCount; i++) {
+        const dist = this.scratchProbePositions[i].distanceTo(this.scratchButtonPos);
+
+        // Hover glow radius: 8.5 cm
+        if (dist <= 0.085) {
+          this.targetedIds.add(entry.id);
+        }
+
+        // Direct poke trigger radius: 3.8 cm
+        if (dist <= 0.038) {
+          anyProbeInsideTouchRadius = true;
+          if (dist < closestTouchDist) {
+            closestTouchDist = dist;
+            closestTouchId = entry.id;
+          }
+        }
+      }
+    }
+
+    // Touch hysteresis: only activate once per approach-poke-withdraw cycle
+    if (closestTouchId && closestTouchId !== 'handle') {
+      if (!this.wasInTouchZone && this.touchCooldown <= 0) {
+        this.wasInTouchZone = true;
+        this.touchCooldown = 0.35;
+        this.floatingPlayer.depressButton(closestTouchId);
+        this.handleControlAction(closestTouchId);
+        const pressedId = closestTouchId;
+        setTimeout(() => this.floatingPlayer?.releaseButton(pressedId), 180);
+      }
+    } else if (!anyProbeInsideTouchRadius) {
+      this.wasInTouchZone = false;
     }
   }
 
-  private processXRFingerPoke(): void {
-    if (!this.deps?.world || this.touchCooldown > 0) return;
-    const world = this.deps.world;
-    const p = world.player as any;
-    if (!p) return;
+  private checkXRGamepadSummon(): void {
+    const session = this.xrSession || (this.deps?.world?.renderer as any)?.xr?.getSession();
+    if (!session || !session.inputSources || !this.floatingPlayer) return;
 
-    // Probe points: right & left index tips
-    const probes: Vector3[] = [];
-    const rightTip = p.indexTipSpaces?.right;
-    const leftTip = p.indexTipSpaces?.left;
+    const sources = session.inputSources;
+    for (let i = 0; i < sources.length; i++) {
+      const src = sources[i];
+      const gp = src.gamepad;
+      if (!gp || !gp.buttons || gp.buttons.length <= 4) continue;
 
-    if (rightTip && (rightTip.visible || rightTip.matrixWorld?.elements[15] > 0)) {
-      rightTip.updateMatrixWorld();
-      probes.push(new Vector3().setFromMatrixPosition(rightTip.matrixWorld));
-    }
-    if (leftTip && (leftTip.visible || leftTip.matrixWorld?.elements[15] > 0)) {
-      leftTip.updateMatrixWorld();
-      probes.push(new Vector3().setFromMatrixPosition(leftTip.matrixWorld));
-    }
-
-    if (probes.length === 0) return;
-
-    // A. Check Floating Player Buttons
-    if (this.floatingPlayer?.visible) {
-      const hitMeshes = this.floatingPlayer.getHitTestMeshes();
-      for (const btn of hitMeshes) {
-        btn.mesh.updateMatrixWorld();
-        this.scratchButtonPos.setFromMatrixPosition(btn.mesh.matrixWorld);
-
-        for (const probePos of probes) {
-          const dist = probePos.distanceTo(this.scratchButtonPos);
-          if (dist <= 0.038) {
-            this.touchCooldown = 0.35;
-            this.floatingPlayer.depressButton(btn.id);
-            this.handleButtonAction(btn.id as any);
-            setTimeout(() => this.floatingPlayer?.releaseButton(btn.id), 180);
-            return;
-          }
+      // Button 4 on standard XR gamepad mapping is B (right) / Y (left)
+      const pressed = Boolean(gp.buttons[4]?.pressed);
+      if (src.handedness === 'left') {
+        if (pressed && !this.prevSummonBtnLeft && !this.floatingPlayer.visible) {
+          this.summonUI();
         }
-      }
-    }
-
-    // B. Check Wrist Panel Buttons
-    if (this.wristUI?.isOpen) {
-      const hitMeshes = this.wristUI.getHitTestMeshes();
-      for (const btn of hitMeshes) {
-        btn.mesh.updateMatrixWorld();
-        this.scratchButtonPos.setFromMatrixPosition(btn.mesh.matrixWorld);
-
-        for (const probePos of probes) {
-          const dist = probePos.distanceTo(this.scratchButtonPos);
-          if (dist <= 0.032) {
-            this.touchCooldown = 0.35;
-            this.handleButtonAction(btn.id);
-            return;
-          }
+        this.prevSummonBtnLeft = pressed;
+      } else if (src.handedness === 'right') {
+        if (pressed && !this.prevSummonBtnRight && !this.floatingPlayer.visible) {
+          this.summonUI();
         }
-      }
-    }
-
-    // C. Wrist Poke Activation Zone (toggle wrist menu on wrist anchor poke)
-    if (this.pokeAnchorMesh && this.pokeAnchorMesh.parent) {
-      this.pokeAnchorMesh.updateMatrixWorld();
-      this.scratchWristWorldPos.setFromMatrixPosition(this.pokeAnchorMesh.matrixWorld);
-
-      let isInside = false;
-      for (const probePos of probes) {
-        if (probePos.distanceTo(this.scratchWristWorldPos) <= 0.08) {
-          isInside = true;
-          break;
-        }
-      }
-
-      if (isInside) {
-        if (!this.wasInsidePokeZone && this.pokeCooldownRemaining <= 0) {
-          this.wasInsidePokeZone = true;
-          this.pokeCooldownRemaining = 0.40;
-          this.wristUI?.toggle();
-          interactionDebugState.set({ lastWristPokeDetected: true, wristMenuOpen: this.wristUI?.isOpen ?? false });
-        }
-      } else {
-        this.wasInsidePokeZone = false;
+        this.prevSummonBtnRight = pressed;
       }
     }
   }
@@ -733,13 +755,9 @@ export class WristUIController {
     const xrCam = (world?.renderer as any)?.xr?.getCamera ? (world?.renderer as any).xr.getCamera() : null;
     const isPresenting = (world?.renderer as any)?.xr?.isPresenting;
 
-    if (isPresenting && xrCam) {
-      xrCam.getWorldPosition(this.scratchHeadPos);
-    } else {
-      camera.getWorldPosition(this.scratchHeadPos);
-    }
-
-    camera.getWorldDirection(this.scratchForward);
+    const activeCam = isPresenting && xrCam ? xrCam : camera;
+    activeCam.getWorldPosition(this.scratchHeadPos);
+    activeCam.getWorldDirection(this.scratchForward);
     this.scratchForward.y = 0;
     if (this.scratchForward.lengthSq() < 0.001) {
       this.scratchForward.set(0, 0, -1);
@@ -784,7 +802,7 @@ export class WristUIController {
         gain.disconnect();
       };
     } catch (_) {
-      // Audio errors ignored
+      // Ignore audio cue failures
     }
   }
 
@@ -796,7 +814,7 @@ export class WristUIController {
       this.boundOnKeyDown = null;
     }
     if (this.boundOnPointerDown) {
-      window.removeEventListener('pointerdown', this.boundOnPointerDown);
+      window.removeEventListener('pointerdown', this.boundOnPointerDown, { capture: true });
       this.boundOnPointerDown = null;
     }
     if (this.boundOnPointerMove) {
@@ -812,16 +830,25 @@ export class WristUIController {
       this.boundOnXRSelect = null;
       this.xrSession = null;
     }
-    if (this.domToggleButton?.parentElement) {
-      this.domToggleButton.parentElement.removeChild(this.domToggleButton);
-      this.domToggleButton = null;
-    }
     if (this.unsubscribeXR) { this.unsubscribeXR(); this.unsubscribeXR = null; }
     if (this.unsubscribePhase) { this.unsubscribePhase(); this.unsubscribePhase = null; }
-    if (this.currentWristParent) { this.currentWristParent.remove(this.wristRootGroup); this.currentWristParent = null; }
-    if (this.wristUI) { this.wristUI.dispose(); this.wristUI = null; }
-    if (this.floatingPlayer) { this.floatingPlayer.dispose(); this.floatingPlayer = null; }
-    this.deps = null;
+
+    if (this.domToggleButton?.parentNode) {
+      this.domToggleButton.parentNode.removeChild(this.domToggleButton);
+      this.domToggleButton = null;
+    }
+
+    if (this.summonBeaconMesh) {
+      this.summonBeaconMesh.geometry.dispose();
+      (this.summonBeaconMesh.material as MeshBasicMaterial).dispose();
+      this.summonBeaconMesh.parent?.remove(this.summonBeaconMesh);
+      this.summonBeaconMesh = null;
+    }
+
+    if (this.floatingPlayer) {
+      this.floatingPlayer.dispose();
+      this.floatingPlayer = null;
+    }
   }
 }
 

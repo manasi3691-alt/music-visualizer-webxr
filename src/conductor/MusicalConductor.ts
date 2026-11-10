@@ -62,6 +62,13 @@ export class MusicalConductor {
     const relTime = musicExcerpt.toRelativeTime(audioTime);
     const normProgress = musicExcerpt.toNormalizedProgress(audioTime);
 
+    // Do not overwrite COMPLETE state with RELEASE cue transitions when audio ends/skips
+    if (experienceState.phase === 'COMPLETE' && !audioEngine.isPlaying) {
+      this.frameData.relativeTime = relTime;
+      this.frameData.normalizedProgress = normProgress;
+      return this.frameData;
+    }
+
     // Check completion (honors loop setting)
     if (audioEngine.isPlaying && musicExcerpt.isComplete(audioTime)) {
       if (audioEngine.isLooping) {

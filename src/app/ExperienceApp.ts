@@ -109,19 +109,19 @@ export class ExperienceApp {
     // 4. Create UI Overlays
     this.createUI();
 
-    // 4.5 Initialize Wrist UI Controller
+    // 4.5 Initialize Single 3D Holographic Music Interface
     wristUIController.init({
       audio: {
         play: () => audioEngine.play(),
+        playOrResume: () => audioEngine.playOrResume(),
         resume: () => audioEngine.resume(),
         pause: () => audioEngine.pause(),
+        skipToEnd: () => audioEngine.skipToEnd(),
         getCurrentTime: () => audioEngine.currentTime,
         isPlaying: () => audioEngine.isPlaying,
         seekRelative: (delta: number) => audioEngine.seekRelative(delta),
         setVolume: (v: number) => audioEngine.setVolume(v),
         getVolume: () => audioEngine.getVolume(),
-        toggleLoop: () => audioEngine.toggleLoop(),
-        isLooping: () => audioEngine.isLooping,
       },
       excerpt: {
         sourceStart: musicExcerpt.sourceStart,
@@ -136,6 +136,7 @@ export class ExperienceApp {
       replay: () => this.replay(),
       world,
       camera: world.camera,
+      getAudioIntensity: () => audioAnalyzer.currentEnergy,
     });
 
     // 5. Load audio
@@ -163,17 +164,10 @@ export class ExperienceApp {
       }
     }
 
-    // 7. Keyboard shortcuts (Space = Play/Pause, R = Replay, D = Debug)
+    // 7. Keyboard shortcuts (R = Replay, D = Debug; Space/M/Tab/Arrows handled by WristUIController)
     window.addEventListener('keydown', (e) => {
       if (e.code === 'KeyD') {
         this.toggleDebug();
-      } else if (e.code === 'Space') {
-        e.preventDefault();
-        if (experienceState.phase === 'READY' || experienceState.phase === 'PAUSED') {
-          this.start();
-        } else if (experienceState.phase === 'PLAYING') {
-          audioEngine.pause();
-        }
       } else if (e.code === 'KeyR') {
         if (experienceState.phase === 'COMPLETE' || experienceState.phase === 'PLAYING') {
           this.replay();
@@ -182,12 +176,6 @@ export class ExperienceApp {
     });
 
     console.log('[ExperienceApp] Initialized successfully');
-
-    // Desktop verification: dispatch Tab key after 1.5s to demonstrate open transition
-    setTimeout(() => {
-      console.log('[ExperienceApp] Dispatching Tab key to open Wrist UI...');
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Tab', bubbles: true }));
-    }, 1500);
   }
 
   /**

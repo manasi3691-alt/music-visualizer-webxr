@@ -190,9 +190,9 @@ export class SoundBubbles {
       isFeature: boolean;
     }[] = [
       // === 10 SMALL-TO-MEDIUM DELICATE BUBBLES (scale 0.80 – 1.05, radius ~1.8cm to 2.3cm) ===
-      // 0. Right-Front Low: effortless right-hand touch target
+      // 0. Right-Front Low: clear of Holographic Music UI console
       {
-        x: 0.32, y: 0.94, z: -0.48, scale: 0.95,
+        x: 0.54, y: 0.96, z: -0.44, scale: 0.95,
         baseColor: new Color(0x00f2fe), // Luminous Cyan
         hoverColor: new Color(0xfff2b2),
         isFeature: false,
@@ -218,9 +218,9 @@ export class SoundBubbles {
         hoverColor: new Color(0xff77e9),
         isFeature: false,
       },
-      // 4. Right-Low Armrest: relaxed low reach
+      // 4. Right-Low Armrest: relaxed low reach, clear of Holographic Music UI
       {
-        x: 0.28, y: 0.86, z: -0.42, scale: 0.80,
+        x: 0.48, y: 0.78, z: -0.40, scale: 0.80,
         baseColor: new Color(0xfff2b2), // Golden Pearl
         hoverColor: new Color(0xff77e9),
         isFeature: false,

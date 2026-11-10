@@ -42,6 +42,19 @@ export class AudioEngine {
     const { sourceStart, sourceEnd } = musicExcerpt;
     const newTime = Math.max(sourceStart, Math.min(sourceEnd - 0.5, this.audioElement.currentTime + deltaSec));
     this.audioElement.currentTime = newTime;
+    if (experienceState.phase === 'COMPLETE' && newTime < sourceEnd - 0.5) {
+      experienceState.setPhase(this._isPlaying ? 'PLAYING' : 'PAUSED');
+    }
+  }
+
+  /** Skip cleanly to the end of the track and enter COMPLETE state */
+  skipToEnd(): void {
+    if (!this.audioElement) return;
+    this.audioElement.pause();
+    this.audioElement.currentTime = musicExcerpt.sourceEnd;
+    this._isPlaying = false;
+    audioAnalyzer.reset();
+    experienceState.setPhase('COMPLETE');
   }
 
   /** Set master gain [0.0 – 1.0] */
@@ -197,17 +210,28 @@ export class AudioEngine {
     }
   }
 
-  resume(): void {
-    if (this.audioElement && !this._isPlaying) {
-      if (this.audioContext && this.audioContext.state === 'suspended') {
-        this.audioContext.resume();
-      }
-      this.audioElement.play().then(() => {
-        this._isPlaying = true;
-        experienceState.setPhase('PLAYING');
-      }).catch((err) => {
-        console.error('[AudioEngine] Resume failed:', err);
-      });
+  async resume(): Promise<void> {
+    if (!this.audioElement || this._isPlaying) return;
+    this.setupWebAudio();
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+    try {
+      await this.audioElement.play();
+      this._isPlaying = true;
+      experienceState.setPhase('PLAYING');
+    } catch (err) {
+      console.error('[AudioEngine] Resume failed:', err);
+    }
+  }
+
+  /** Play from start if not yet started or completed; otherwise resume from current position */
+  async playOrResume(): Promise<void> {
+    if (!this.audioElement) return;
+    if (!this._userInitiated || musicExcerpt.isComplete(this.currentTime)) {
+      await this.play();
+    } else {
+      await this.resume();
     }
   }
 

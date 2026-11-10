@@ -118,6 +118,10 @@ export class AudioAnalyzer {
     };
   }
 
+  get currentEnergy(): number {
+    return this._energy;
+  }
+
   getMetrics(): AudioMetrics {
     return {
       low: this._low,

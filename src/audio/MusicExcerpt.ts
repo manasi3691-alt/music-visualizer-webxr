@@ -40,7 +40,7 @@ export class MusicExcerpt {
    * Check if current audio time has reached or exceeded excerpt end
    */
   isComplete(audioTime: number): boolean {
-    return audioTime >= this.sourceEnd - 0.05;
+    return audioTime >= this.sourceEnd - 0.12;
   }
 
   /**
