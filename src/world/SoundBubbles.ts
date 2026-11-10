@@ -29,7 +29,7 @@ import {
   Color,
   Vector3,
   AdditiveBlending,
-  DoubleSide,
+  FrontSide,
 } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
@@ -89,6 +89,12 @@ export class SoundBubbles {
   private scratchToBubble       = new Vector3();
   private scratchClosestPoint   = new Vector3();
   private scratchLocalTouch     = new Vector3();
+  private scratchProbePositions: Vector3[] = [new Vector3(), new Vector3(), new Vector3(), new Vector3()];
+  private scratchProbeIsFinger: boolean[] = [false, false, false, false];
+  private scratchProbeCount = 0;
+  private scratchRayOrigins: Vector3[] = [new Vector3(), new Vector3()];
+  private scratchRayDirs: Vector3[] = [new Vector3(), new Vector3()];
+  private scratchRayCount = 0;
 
   // XR Session and world references
   private xrWorld: any = null;
@@ -99,9 +105,8 @@ export class SoundBubbles {
   constructor(isQuest = false) {
     this.maxParticles = isQuest ? 1200 : 2000;
 
-    // Build delicate, small, rounded procedural teardrop water droplet geometry
-    // Base radius: 0.022m (2.2cm) — small droplets (1.8–2.3cm) and feature droplets (3.0–3.3cm)
-    this.geoDroplet = this.buildTeardropGeometry(0.022, 24, 24);
+    // Smooth, perfectly round 3D spherical soap bubble geometry
+    this.geoDroplet = new SphereGeometry(0.022, isQuest ? 24 : 32, isQuest ? 20 : 28);
 
     this.buildReachableBubbles();
     this.buildParticlePool();
@@ -131,53 +136,8 @@ export class SoundBubbles {
   }
 
   /**
-   * Procedural organic teardrop droplet geometry.
-   * Sculpted with a plump, rounded dome bottom and a slender, elegant tapered crown.
-   */
-  private buildTeardropGeometry(radius: number, widthSegments: number, heightSegments: number): BufferGeometry {
-    const geo = new SphereGeometry(radius, widthSegments, heightSegments);
-    const pos = geo.attributes.position;
-
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const z = pos.getZ(i);
-
-      const normY = y / radius; // -1 to +1
-      const curRad = Math.sqrt(x * x + z * z);
-
-      // Water droplet profile:
-      // - Lower half (normY < 0): plump, spherical dome base
-      // - Upper half (normY >= 0): slender, smooth tapering towards the apex
-      let profileRadius = Math.sqrt(Math.max(0, 1.0 - normY * normY));
-      if (normY > 0) {
-        // Graceful slender taper
-        profileRadius *= (1.0 - 0.58 * Math.pow(normY, 1.25));
-      } else {
-        // Slightly fuller bottom dome
-        profileRadius *= (1.0 + 0.08 * (1.0 + normY));
-      }
-
-      if (curRad > 0.0001) {
-        const scaleXZ = (profileRadius * radius) / curRad;
-        pos.setX(i, x * scaleXZ);
-        pos.setZ(i, z * scaleXZ);
-      }
-
-      // Delicate, rounded water droplet vertical proportion
-      const stretchY = normY > 0 ? y * 1.14 : y * 1.05;
-      pos.setY(i, stretchY);
-    }
-
-    geo.computeVertexNormals();
-    return geo;
-  }
-
-  /**
-   * Sets up 10 small-to-medium bubbles and 4 feature bubbles around the seated user.
-   * Ergonomically calibrated for comfortable seated reach (chest ~0.95m, eye ~1.22m):
-   * - Central Lotus corridor (|x| < 0.16m, y < 1.45m) is kept 100% UNTOUCHED and unobstructed.
-   * - Left wrist UI area (x in [-0.35, -0.15], y in [0.85, 1.15]) is kept UNTOUCHED and clear.
+   * Sets up 10 small-to-medium round soap bubbles and 4 feature bubbles in comfortable seated reach.
+   * Central Crystal Lotus corridor and Holographic Music UI area remain completely unobstructed.
    */
   private buildReachableBubbles(): void {
     const configs: {
@@ -189,111 +149,98 @@ export class SoundBubbles {
       hoverColor: Color;
       isFeature: boolean;
     }[] = [
-      // === 10 SMALL-TO-MEDIUM DELICATE BUBBLES (scale 0.80 – 1.05, radius ~1.8cm to 2.3cm) ===
-      // 0. Right-Front Low: clear of Holographic Music UI console
+      // === 10 SMALL-TO-MEDIUM SPHERICAL SOAP BUBBLES (scale 0.72 – 1.08, radius ~1.6cm to 2.4cm) ===
       {
-        x: 0.54, y: 0.96, z: -0.44, scale: 0.95,
-        baseColor: new Color(0x00f2fe), // Luminous Cyan
+        x: 0.54, y: 0.96, z: -0.44, scale: 0.92,
+        baseColor: new Color(0x66f3ff), // Sheer Cyan
         hoverColor: new Color(0xfff2b2),
         isFeature: false,
       },
-      // 1. Right-Front Mid: eye-level right
       {
-        x: 0.42, y: 1.15, z: -0.52, scale: 1.02,
-        baseColor: new Color(0xff77e9), // Pearlescent Pink
-        hoverColor: new Color(0x38ef7d),
+        x: 0.42, y: 1.15, z: -0.52, scale: 1.04,
+        baseColor: new Color(0xff99eb), // Pastel Pink
+        hoverColor: new Color(0x88f7ff),
         isFeature: false,
       },
-      // 2. Right-Mid High: comfortable slight upward reach right
       {
-        x: 0.52, y: 1.34, z: -0.44, scale: 0.88,
-        baseColor: new Color(0x8a2be2), // Royal Violet
-        hoverColor: new Color(0x00f2fe),
+        x: 0.52, y: 1.34, z: -0.44, scale: 0.82,
+        baseColor: new Color(0xa97dff), // Soft Violet
+        hoverColor: new Color(0x88f7ff),
         isFeature: false,
       },
-      // 3. Right-Flank Mid: right side flank reach
       {
-        x: 0.62, y: 1.08, z: -0.34, scale: 1.05,
-        baseColor: new Color(0xb39ddb), // Ethereal Lavender
-        hoverColor: new Color(0xff77e9),
+        x: 0.62, y: 1.08, z: -0.34, scale: 1.08,
+        baseColor: new Color(0xc7b8ff), // Lavender Pearl
+        hoverColor: new Color(0xff99eb),
         isFeature: false,
       },
-      // 4. Right-Low Armrest: relaxed low reach, clear of Holographic Music UI
       {
-        x: 0.48, y: 0.78, z: -0.40, scale: 0.80,
-        baseColor: new Color(0xfff2b2), // Golden Pearl
-        hoverColor: new Color(0xff77e9),
+        x: 0.48, y: 0.78, z: -0.40, scale: 0.72,
+        baseColor: new Color(0x9be7ff), // Icy Sky Cyan
+        hoverColor: new Color(0xffb8e6),
         isFeature: false,
       },
-      // 5. Left-High Front: comfortably above the wrist UI
       {
-        x: -0.38, y: 1.36, z: -0.48, scale: 1.00,
-        baseColor: new Color(0xb39ddb), // Ethereal Lavender
-        hoverColor: new Color(0xff77e9),
+        x: -0.38, y: 1.36, z: -0.48, scale: 0.98,
+        baseColor: new Color(0xc8b6ff), // Ethereal Lavender
+        hoverColor: new Color(0xff99eb),
         isFeature: false,
       },
-      // 6. Left-Side Flank: left lateral reach
       {
-        x: -0.56, y: 1.18, z: -0.36, scale: 0.92,
-        baseColor: new Color(0xf4a4a8), // Rose Gold
-        hoverColor: new Color(0x00f2fe),
+        x: -0.56, y: 1.18, z: -0.36, scale: 0.86,
+        baseColor: new Color(0xffa8d8), // Blush Rose
+        hoverColor: new Color(0x88f7ff),
         isFeature: false,
       },
-      // 7. Left-Side Low: relaxed low left reach (outside wrist box)
       {
-        x: -0.48, y: 0.88, z: -0.38, scale: 0.85,
-        baseColor: new Color(0x1de9b6), // Aquamarine Turquoise
-        hoverColor: new Color(0xfff2b2),
+        x: -0.48, y: 0.88, z: -0.38, scale: 0.76,
+        baseColor: new Color(0x7af5e8), // Soft Aqua Cyan
+        hoverColor: new Color(0xe0c3fc),
         isFeature: false,
       },
-      // 8. Left-High Arch: arched upward left
       {
-        x: -0.26, y: 1.48, z: -0.46, scale: 0.96,
-        baseColor: new Color(0xff4081), // Radiant Magenta
+        x: -0.26, y: 1.48, z: -0.46, scale: 0.94,
+        baseColor: new Color(0xf599e2), // Radiant Orchid Pink
         hoverColor: new Color(0x80d8ff),
         isFeature: false,
       },
-      // 9. Center-High Overhead: high above lotus sight-line
       {
         x: 0.06, y: 1.54, z: -0.54, scale: 1.02,
-        baseColor: new Color(0xe0f7fa), // Pearlescent Opal
-        hoverColor: new Color(0xffd54f),
+        baseColor: new Color(0xdbf7ff), // Pearlescent Ice
+        hoverColor: new Color(0xe2b8ff),
         isFeature: false,
       },
 
-      // === 3–4 FEATURE BUBBLES (scale 1.40 – 1.48, radius ~3.1cm to 3.3cm) ===
-      // 10. Feature 1: Right Hero Droplet (primary right-hand showcase)
+      // === 4 LARGER FEATURE SOAP BUBBLES (scale 1.38 – 1.62, radius ~3.0cm to 3.6cm) ===
       {
-        x: 0.46, y: 1.25, z: -0.46, scale: 1.45,
-        baseColor: new Color(0x00e5ff), // Luminous Cyan-Turquoise
+        x: 0.46, y: 1.25, z: -0.46, scale: 1.55,
+        baseColor: new Color(0x70f3ff), // Cyan-Lavender Hero Sphere
         hoverColor: new Color(0xffe082),
         isFeature: true,
       },
-      // 11. Feature 2: Left Hero Droplet (prominent left-hand showcase)
       {
-        x: -0.45, y: 1.32, z: -0.42, scale: 1.40,
-        baseColor: new Color(0x9c27b0), // Royal Lavender-Violet
-        hoverColor: new Color(0xff80ab),
+        x: -0.45, y: 1.32, z: -0.42, scale: 1.44,
+        baseColor: new Color(0xb588ff), // Lavender-Violet Hero Sphere
+        hoverColor: new Color(0xff99eb),
         isFeature: true,
       },
-      // 12. Feature 3: Right-Flank Hero Droplet (rich iridescent rose gold)
       {
-        x: 0.58, y: 1.42, z: -0.36, scale: 1.48,
-        baseColor: new Color(0xff8a80), // Rose Gold Pearlescent
+        x: 0.58, y: 1.42, z: -0.36, scale: 1.62,
+        baseColor: new Color(0xffa3dc), // Pink-Pearl Hero Sphere
         hoverColor: new Color(0x84ffff),
         isFeature: true,
       },
-      // 13. Feature 4: Overhead Crown Hero Droplet (magnificent rainbow pearl overhead)
       {
-        x: -0.05, y: 1.58, z: -0.52, scale: 1.42,
-        baseColor: new Color(0xf8bbd0), // Rainbow Iridescent Pearl
-        hoverColor: new Color(0x18ffff),
+        x: -0.05, y: 1.58, z: -0.52, scale: 1.38,
+        baseColor: new Color(0xd8c8ff), // Rainbow Iridescent Crown Sphere
+        hoverColor: new Color(0x70f3ff),
         isFeature: true,
       },
     ];
 
     for (let i = 0; i < configs.length; i++) {
       const cfg = configs[i];
+      const seed = i * 1.73 + 0.41;
 
       const mat = new ShaderMaterial({
         uniforms: {
@@ -301,14 +248,13 @@ export class SoundBubbles {
           uAlpha: { value: 0 },
           uHover: { value: 0 },
           uPopProgress: { value: 0 },
+          uSeed: { value: seed },
           uBaseColor: { value: cfg.baseColor },
           uHoverColor: { value: cfg.hoverColor },
           uTouchPoint: { value: new Vector3(0, 0, 0.05) },
         },
         vertexShader: `
-          uniform float uTime;
           uniform float uPopProgress;
-          uniform float uHover;
 
           varying vec3 vNormal;
           varying vec3 vWorldPos;
@@ -316,18 +262,12 @@ export class SoundBubbles {
           varying vec3 vLocalPos;
 
           void main() {
+            // Keep geometry strictly smooth and perfectly spherical (no blob wobble)
             vNormal = normalize(normalMatrix * normal);
             vLocalPos = position;
 
-            vec3 pos = position;
-
-            // Pre-pop expansion and intense surface tension shimmer
-            float popWobbleSpeed = mix(3.5, 30.0, uPopProgress);
-            float popWobbleAmp = mix(0.015, 0.055, uPopProgress);
-
-            // Natural floating liquid surface tension wobble
-            float wobble = sin(uTime * popWobbleSpeed + pos.y * 14.0) * (popWobbleAmp + uHover * 0.008);
-            pos += normal * wobble;
+            // Gentle isotropic shimmer only during final 140ms pop expansion
+            vec3 pos = position * (1.0 + uPopProgress * 0.04);
 
             vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
             vViewDir = -mvPosition.xyz;
@@ -341,6 +281,7 @@ export class SoundBubbles {
           uniform float uAlpha;
           uniform float uHover;
           uniform float uPopProgress;
+          uniform float uSeed;
           uniform vec3 uBaseColor;
           uniform vec3 uHoverColor;
           uniform vec3 uTouchPoint;
@@ -350,53 +291,105 @@ export class SoundBubbles {
           varying vec3 vViewDir;
           varying vec3 vLocalPos;
 
+          float hash31(vec3 p) {
+            p = fract(p * 0.1031);
+            p += dot(p, p.yzx + 33.33);
+            return fract((p.x + p.y) * p.z);
+          }
+
           void main() {
             vec3 N = normalize(vNormal);
             vec3 V = normalize(vViewDir);
+            vec3 unitP = normalize(vLocalPos);
 
-            float NdotV = max(0.0, dot(N, V));
-            // Fresnel glancing edge factor
-            float fresnel = pow(1.0 - NdotV, 2.6);
+            float NdotV = clamp(dot(N, V), 0.0, 1.0);
+            // Glass Fresnel edge factor: ultra-sheer center, crisp glowing rainbow rim
+            float fresnel = pow(1.0 - NdotV, 2.85);
+            float outerRim = pow(1.0 - NdotV, 5.2);
 
-            // Pearlescent chromatic dispersion ramp (cyan, lavender, pink, violet, gold)
-            float irid = fract(fresnel * 1.8 + uTime * 0.14 + vLocalPos.y * 10.0);
-            vec3 pearlescent = 0.5 + 0.5 * cos(6.28318 * (vec3(1.0) * irid + vec3(0.0, 0.33, 0.67)));
+            // Soap-film thin interference across cyan, pink, lavender, and violet
+            float swirl = sin(unitP.x * 3.4 + unitP.y * 4.2 + uTime * 0.42 + uSeed) * 0.36
+                        + cos(unitP.z * 3.1 - unitP.y * 2.5 - uTime * 0.28 + uSeed) * 0.26;
+            float filmPhase = fract(fresnel * 1.45 + swirl * 0.52 + uSeed * 0.23);
 
-            vec3 waterColor = mix(uBaseColor, pearlescent, 0.58);
+            vec3 cCyan     = vec3(0.18, 0.95, 1.00);
+            vec3 cLavender = vec3(0.74, 0.68, 1.00);
+            vec3 cPink     = vec3(1.00, 0.55, 0.88);
+            vec3 cViolet   = vec3(0.62, 0.36, 1.00);
 
-            // Internal light depth glow (mimics translucent water droplet thickness)
-            float coreGlow = pow(NdotV, 3.2) * 0.28;
-            vec3 internalGlow = mix(uBaseColor, vec3(1.0, 0.95, 1.0), 0.6) * coreGlow;
+            vec3 iridColor;
+            if (filmPhase < 0.25) {
+              iridColor = mix(cCyan, cLavender, filmPhase * 4.0);
+            } else if (filmPhase < 0.50) {
+              iridColor = mix(cLavender, cPink, (filmPhase - 0.25) * 4.0);
+            } else if (filmPhase < 0.75) {
+              iridColor = mix(cPink, cViolet, (filmPhase - 0.50) * 4.0);
+            } else {
+              iridColor = mix(cViolet, cCyan, (filmPhase - 0.75) * 4.0);
+            }
 
-            // Hover highlight: glowing rim aura when hand or ray approaches
-            vec3 hoverAura = uHoverColor * (uHover * (fresnel * 1.5 + 0.35));
+            vec3 rimColor = mix(uBaseColor, iridColor, 0.76);
+            rimColor = mix(rimColor, vec3(0.95, 0.97, 1.00), outerRim * 0.26);
 
-            // Concentric contact highlight ring at finger/probe point
-            float touchDist = length(vLocalPos - uTouchPoint);
-            float ring = exp(-pow((touchDist - 0.035) * 45.0, 2.0));
-            float centerSpot = exp(-pow(touchDist * 35.0, 2.0));
-            vec3 ringColor = vec3(1.0, 0.98, 0.90) * (ring * 1.4 + centerSpot * 1.0) * uHover;
+            // Signature curved pearlescent veil band across the glass sphere
+            float bandTilt = dot(unitP, normalize(vec3(0.38, 0.84, 0.28)))
+                           + sin(unitP.x * 4.5 + uTime * 0.5 + uSeed) * 0.12;
+            float causticBand = exp(-pow((bandTilt + 0.08) * 3.5, 2.0));
+            vec3 bandTint = mix(cLavender, cCyan, 0.5 + 0.5 * sin(unitP.x * 3.4 + uSeed));
+            bandTint = mix(bandTint, cPink, 0.28 * (0.5 + 0.5 * cos(unitP.y * 4.0 + uSeed)));
 
-            // Dual crisp specular glints (cosmic sky & starlight)
-            vec3 L1 = normalize(vec3(0.35, 0.85, 0.45));
+            // Tiny internal shimmering sparkles concentrated in the film band & inner rim
+            vec3 spGrid = unitP * 15.0 + vec3(uTime * 0.10, -uTime * 0.07, uSeed);
+            vec3 cell = floor(spGrid);
+            vec3 f = fract(spGrid) - 0.5;
+            float h1 = hash31(cell);
+            float h2 = hash31(cell + 17.3);
+            vec3 jitter = (vec3(h1, h2, fract(h1 * 13.7)) - 0.5) * 0.52;
+            float dotDist = length(f - jitter);
+            float twinkle = 0.45 + 0.55 * sin(uTime * (5.5 + h1 * 6.5) + h2 * 6.2831);
+            float sparkleMask = step(0.64, h1) * smoothstep(0.19, 0.01, dotDist) * twinkle;
+            float sparkleVis = sparkleMask * (0.45 + causticBand * 1.15 + fresnel * 0.80);
+
+            // Soft glass specular reflections (upper-left highlight + lower-right bounce)
+            vec3 L1 = normalize(vec3(-0.42, 0.72, 0.55));
             vec3 H1 = normalize(L1 + V);
-            float spec1 = pow(max(0.0, dot(N, H1)), 32.0);
+            float specSharp = pow(max(0.0, dot(N, H1)), 54.0);
+            float specSoft  = pow(max(0.0, dot(N, H1)), 9.0) * 0.20;
 
-            vec3 L2 = normalize(vec3(-0.45, 0.65, -0.35));
+            vec3 L2 = normalize(vec3(0.55, -0.45, 0.52));
             vec3 H2 = normalize(L2 + V);
-            float spec2 = pow(max(0.0, dot(N, H2)), 22.0) * 0.45;
+            float specBounce = pow(max(0.0, dot(N, H2)), 18.0) * 0.36;
 
-            // Pop flash surge
-            float popFlash = pow(uPopProgress, 2.6) * 2.6;
+            // Hover targeting glow & contact highlight
+            vec3 hoverAura = uHoverColor * (uHover * (fresnel * 1.50 + 0.30));
+            float touchDist = length(vLocalPos - uTouchPoint);
+            float touchRing = exp(-pow((touchDist - 0.032) * 45.0, 2.0));
+            vec3 ringColor = vec3(1.0, 0.98, 0.95) * touchRing * 1.1 * uHover;
 
-            vec3 finalColor = waterColor + internalGlow + hoverAura + ringColor + vec3(spec1 * 0.85 + spec2 * 0.4) + vec3(popFlash);
-            float alpha = clamp((fresnel * 0.72 + 0.16 + uHover * 0.22 + spec1 * 0.5 + popFlash) * uAlpha, 0.0, 0.95);
+            float popFlash = pow(uPopProgress, 2.2) * 2.2;
 
-            gl_FragColor = vec4(finalColor, alpha);
+            vec3 finalColor = rimColor * (fresnel * 1.48 + 0.26)
+                            + bandTint * (causticBand * 0.58)
+                            + vec3(0.96, 0.98, 1.00) * (specSharp * 0.95 + specSoft + sparkleVis * 1.55)
+                            + mix(cPink, cCyan, 0.5) * specBounce
+                            + hoverAura + ringColor + vec3(popFlash);
+
+            // Crystal-clear hollow glass center (alpha ~0.045), bright glowing rainbow rim
+            float baseAlpha = 0.045
+                            + fresnel * 0.86
+                            + outerRim * 0.20
+                            + causticBand * 0.28
+                            + sparkleVis * 0.58
+                            + specSharp * 0.70
+                            + specSoft * 0.36
+                            + uHover * 0.22
+                            + popFlash;
+
+            gl_FragColor = vec4(finalColor, clamp(baseAlpha * uAlpha, 0.0, 0.96));
           }
         `,
         transparent: true,
-        side: DoubleSide,
+        side: FrontSide,
         depthWrite: false,
       });
 
@@ -574,56 +567,36 @@ export class SoundBubbles {
     const { high, energy } = metrics;
     this.particleMat.uniforms.uTime.value = t;
 
-    // 1. Gather all VR probe points (hands, fingers, controllers, rays)
-    const probePoints: { pos: Vector3; isFinger: boolean }[] = [];
-    const pointingRays: { origin: Vector3; dir: Vector3 }[] = [];
+    // 1. Gather all VR probe points (hands, fingers, controllers, rays) with zero allocations
+    this.scratchProbeCount = 0;
+    this.scratchRayCount = 0;
 
     if (this.xrWorld) {
       const p = this.xrWorld.player;
       if (p) {
-        // Hand tracking index fingertips (primary poke probes)
-        const rightIndex = p.indexTipSpaces?.right;
-        const leftIndex = p.indexTipSpaces?.left;
-        if (rightIndex && (rightIndex.visible || rightIndex.matrixWorld?.elements[15] > 0)) {
-          rightIndex.updateMatrixWorld();
-          const v = new Vector3().setFromMatrixPosition(rightIndex.matrixWorld);
-          probePoints.push({ pos: v, isFinger: true });
-        }
-        if (leftIndex && (leftIndex.visible || leftIndex.matrixWorld?.elements[15] > 0)) {
-          leftIndex.updateMatrixWorld();
-          const v = new Vector3().setFromMatrixPosition(leftIndex.matrixWorld);
-          probePoints.push({ pos: v, isFinger: true });
-        }
+        const addProbe = (space: any, isFinger: boolean) => {
+          if (space && (space.visible || space.matrixWorld?.elements[15] > 0) && this.scratchProbeCount < 4) {
+            space.updateMatrixWorld();
+            this.scratchProbePositions[this.scratchProbeCount].setFromMatrixPosition(space.matrixWorld);
+            this.scratchProbeIsFinger[this.scratchProbeCount] = isFinger;
+            this.scratchProbeCount++;
+          }
+        };
+        const addRay = (space: any) => {
+          if (space && (space.visible || space.matrixWorld?.elements[15] > 0) && this.scratchRayCount < 2) {
+            space.updateMatrixWorld();
+            this.scratchRayOrigins[this.scratchRayCount].setFromMatrixPosition(space.matrixWorld);
+            this.scratchRayDirs[this.scratchRayCount].set(0, 0, -1).transformDirection(space.matrixWorld).normalize();
+            this.scratchRayCount++;
+          }
+        };
 
-        // Controller grip spaces
-        const rightGrip = p.gripSpaces?.right;
-        const leftGrip = p.gripSpaces?.left;
-        if (rightGrip && (rightGrip.visible || rightGrip.matrixWorld?.elements[15] > 0)) {
-          rightGrip.updateMatrixWorld();
-          const v = new Vector3().setFromMatrixPosition(rightGrip.matrixWorld);
-          probePoints.push({ pos: v, isFinger: false });
-        }
-        if (leftGrip && (leftGrip.visible || leftGrip.matrixWorld?.elements[15] > 0)) {
-          leftGrip.updateMatrixWorld();
-          const v = new Vector3().setFromMatrixPosition(leftGrip.matrixWorld);
-          probePoints.push({ pos: v, isFinger: false });
-        }
-
-        // Controller / hand ray spaces
-        const rightRay = p.raySpaces?.right;
-        const leftRay = p.raySpaces?.left;
-        if (rightRay && (rightRay.visible || rightRay.matrixWorld?.elements[15] > 0)) {
-          rightRay.updateMatrixWorld();
-          const o = new Vector3().setFromMatrixPosition(rightRay.matrixWorld);
-          const d = new Vector3(0, 0, -1).transformDirection(rightRay.matrixWorld).normalize();
-          pointingRays.push({ origin: o, dir: d });
-        }
-        if (leftRay && (leftRay.visible || leftRay.matrixWorld?.elements[15] > 0)) {
-          leftRay.updateMatrixWorld();
-          const o = new Vector3().setFromMatrixPosition(leftRay.matrixWorld);
-          const d = new Vector3(0, 0, -1).transformDirection(leftRay.matrixWorld).normalize();
-          pointingRays.push({ origin: o, dir: d });
-        }
+        addProbe(p.indexTipSpaces?.right, true);
+        addProbe(p.indexTipSpaces?.left, true);
+        addProbe(p.gripSpaces?.right, false);
+        addProbe(p.gripSpaces?.left, false);
+        addRay(p.raySpaces?.right);
+        addRay(p.raySpaces?.left);
       }
     }
 
@@ -635,20 +608,19 @@ export class SoundBubbles {
 
       // Handle States
       if (b.state === 'idle') {
-        // Organic floating motion
+        // Gentle independent floating motion
         const floatY = Math.sin(t * b.floatSpeed + b.floatPhase) * b.floatAmplitude;
         const floatX = Math.cos(t * b.floatSpeed * 0.7 + b.floatPhase) * b.floatAmplitude * 0.35;
         b.mesh.position.set(b.restPos.x + floatX, b.restPos.y + floatY, b.restPos.z);
 
-        // Music-synced subtle breathing scale
-        const breathe = 1.0 + Math.sin(t * 1.5 + b.floatPhase) * 0.04 + energy * 0.06;
+        // Subtle music-synced breathing scale
+        const breathe = 1.0 + Math.sin(t * 1.5 + b.floatPhase) * 0.03 + energy * 0.05;
         b.currentScale = b.baseScale * masterVis * breathe;
         b.mesh.scale.setScalar(Math.max(0.001, b.currentScale));
 
         b.mesh.updateMatrixWorld();
         this.scratchBubbleWorldPos.setFromMatrixPosition(b.mesh.matrixWorld);
 
-        // Touch hit radius scaled to the new delicate compact droplet size (base 0.022m * scale)
         const hitRadius = 0.040 * b.baseScale;
         const hoverRadius = 0.20 * b.baseScale;
 
@@ -656,34 +628,35 @@ export class SoundBubbles {
         let targetHover = 0;
         let touched = false;
 
-        for (let p = 0; p < probePoints.length; p++) {
-          const probe = probePoints[p];
-          const dist = probe.pos.distanceTo(this.scratchBubbleWorldPos);
+        for (let p = 0; p < this.scratchProbeCount; p++) {
+          const probePos = this.scratchProbePositions[p];
+          const isFinger = this.scratchProbeIsFinger[p];
+          const dist = probePos.distanceTo(this.scratchBubbleWorldPos);
 
           if (dist < hoverRadius) {
             const h = 1.0 - (dist / hoverRadius);
             if (h > targetHover) {
               targetHover = h;
-              this.scratchLocalTouch.copy(probe.pos).sub(this.scratchBubbleWorldPos);
+              this.scratchLocalTouch.copy(probePos).sub(this.scratchBubbleWorldPos);
               b.touchLocalPoint.copy(this.scratchLocalTouch);
             }
           }
 
-          // Direct Touch Poke trigger!
-          if (dist <= hitRadius + (probe.isFinger ? 0.035 : 0.055)) {
+          if (dist <= hitRadius + (isFinger ? 0.035 : 0.055)) {
             touched = true;
             break;
           }
         }
 
         // B. Test Ray pointing hover
-        if (!touched && pointingRays.length > 0) {
-          for (let r = 0; r < pointingRays.length; r++) {
-            const ray = pointingRays[r];
-            this.scratchToBubble.copy(this.scratchBubbleWorldPos).sub(ray.origin);
-            const projection = this.scratchToBubble.dot(ray.dir);
+        if (!touched && this.scratchRayCount > 0) {
+          for (let r = 0; r < this.scratchRayCount; r++) {
+            const rayOrigin = this.scratchRayOrigins[r];
+            const rayDir = this.scratchRayDirs[r];
+            this.scratchToBubble.copy(this.scratchBubbleWorldPos).sub(rayOrigin);
+            const projection = this.scratchToBubble.dot(rayDir);
             if (projection > 0 && projection < 2.5) {
-              this.scratchClosestPoint.copy(ray.origin).addScaledVector(ray.dir, projection);
+              this.scratchClosestPoint.copy(rayOrigin).addScaledVector(rayDir, projection);
               const distToRay = this.scratchClosestPoint.distanceTo(this.scratchBubbleWorldPos);
               if (distToRay < hoverRadius) {
                 const h = 1.0 - (distToRay / hoverRadius);
