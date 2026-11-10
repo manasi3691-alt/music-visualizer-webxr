@@ -23,13 +23,11 @@ export class DesktopInput {
   private lastMouseX = 0;
   private lastMouseY = 0;
 
-  // Clamped head rotation angles (radians)
+  // Seated head rotation angles (radians) — full 360° horizontal look with clamped pitch
   private yaw = 0;
   private pitch = 0;
-  private readonly maxPitch = Math.PI * 0.35;
-  private readonly minPitch = -Math.PI * 0.25;
-  private readonly maxYaw = Math.PI * 0.65;
-  private readonly minYaw = -Math.PI * 0.65;
+  private readonly maxPitch = Math.PI * 0.42;
+  private readonly minPitch = -Math.PI * 0.32;
 
   private raycaster = new Raycaster();
   private mouseVec = new Vector2();
@@ -196,9 +194,9 @@ export class DesktopInput {
       );
       interactionRegistry.onGrabUpdate(dummyControllerPos);
     } else {
-      // Rotate camera within seated limits
+      // Rotate camera cleanly across full 360° yaw and comfortable pitch limits
       const sensitivity = 0.003;
-      this.yaw = Math.max(this.minYaw, Math.min(this.maxYaw, this.yaw - deltaX * sensitivity));
+      this.yaw -= deltaX * sensitivity;
       this.pitch = Math.max(this.minPitch, Math.min(this.maxPitch, this.pitch - deltaY * sensitivity));
 
       if (this.camera) {

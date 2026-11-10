@@ -105,8 +105,8 @@ export class SoundBubbles {
   constructor(isQuest = false) {
     this.maxParticles = isQuest ? 1200 : 2000;
 
-    // Smooth, perfectly round 3D spherical soap bubble geometry
-    this.geoDroplet = new SphereGeometry(0.022, isQuest ? 24 : 32, isQuest ? 20 : 28);
+    // Smooth, perfectly round 3D spherical soap bubble geometry (tuned for Quest 3S 72-90fps)
+    this.geoDroplet = new SphereGeometry(0.022, isQuest ? 20 : 28, isQuest ? 16 : 22);
 
     this.buildReachableBubbles();
     this.buildParticlePool();
@@ -136,7 +136,8 @@ export class SoundBubbles {
   }
 
   /**
-   * Sets up 10 small-to-medium round soap bubbles and 4 feature bubbles in comfortable seated reach.
+   * Sets up 31 smooth spherical soap bubbles distributed across a genuine 360-degree
+   * volumetric cloud around the seated user (front, back, left, right, above & below eye level).
    * Central Crystal Lotus corridor and Holographic Music UI area remain completely unobstructed.
    */
   private buildReachableBubbles(): void {
@@ -149,93 +150,44 @@ export class SoundBubbles {
       hoverColor: Color;
       isFeature: boolean;
     }[] = [
-      // === 10 SMALL-TO-MEDIUM SPHERICAL SOAP BUBBLES (scale 0.72 – 1.08, radius ~1.6cm to 2.4cm) ===
-      {
-        x: 0.54, y: 0.96, z: -0.44, scale: 0.92,
-        baseColor: new Color(0x66f3ff), // Sheer Cyan
-        hoverColor: new Color(0xfff2b2),
-        isFeature: false,
-      },
-      {
-        x: 0.42, y: 1.15, z: -0.52, scale: 1.04,
-        baseColor: new Color(0xff99eb), // Pastel Pink
-        hoverColor: new Color(0x88f7ff),
-        isFeature: false,
-      },
-      {
-        x: 0.52, y: 1.34, z: -0.44, scale: 0.82,
-        baseColor: new Color(0xa97dff), // Soft Violet
-        hoverColor: new Color(0x88f7ff),
-        isFeature: false,
-      },
-      {
-        x: 0.62, y: 1.08, z: -0.34, scale: 1.08,
-        baseColor: new Color(0xc7b8ff), // Lavender Pearl
-        hoverColor: new Color(0xff99eb),
-        isFeature: false,
-      },
-      {
-        x: 0.48, y: 0.78, z: -0.40, scale: 0.72,
-        baseColor: new Color(0x9be7ff), // Icy Sky Cyan
-        hoverColor: new Color(0xffb8e6),
-        isFeature: false,
-      },
-      {
-        x: -0.38, y: 1.36, z: -0.48, scale: 0.98,
-        baseColor: new Color(0xc8b6ff), // Ethereal Lavender
-        hoverColor: new Color(0xff99eb),
-        isFeature: false,
-      },
-      {
-        x: -0.56, y: 1.18, z: -0.36, scale: 0.86,
-        baseColor: new Color(0xffa8d8), // Blush Rose
-        hoverColor: new Color(0x88f7ff),
-        isFeature: false,
-      },
-      {
-        x: -0.48, y: 0.88, z: -0.38, scale: 0.76,
-        baseColor: new Color(0x7af5e8), // Soft Aqua Cyan
-        hoverColor: new Color(0xe0c3fc),
-        isFeature: false,
-      },
-      {
-        x: -0.26, y: 1.48, z: -0.46, scale: 0.94,
-        baseColor: new Color(0xf599e2), // Radiant Orchid Pink
-        hoverColor: new Color(0x80d8ff),
-        isFeature: false,
-      },
-      {
-        x: 0.06, y: 1.54, z: -0.54, scale: 1.02,
-        baseColor: new Color(0xdbf7ff), // Pearlescent Ice
-        hoverColor: new Color(0xe2b8ff),
-        isFeature: false,
-      },
+      // === FRONT SECTOR (around lotus & music UI, keeping center sightline & UI unobstructed) ===
+      { x: -0.34, y: 1.32, z: -0.48, scale: 0.90, baseColor: new Color(0xc8b6ff), hoverColor: new Color(0xff99eb), isFeature: false },
+      { x: -0.26, y: 0.86, z: -0.46, scale: 0.78, baseColor: new Color(0x7af5e8), hoverColor: new Color(0xe0c3fc), isFeature: false },
+      { x:  0.05, y: 1.56, z: -0.54, scale: 1.00, baseColor: new Color(0xdbf7ff), hoverColor: new Color(0xe2b8ff), isFeature: false },
+      { x: -0.08, y: 1.62, z: -0.68, scale: 1.42, baseColor: new Color(0xd8c8ff), hoverColor: new Color(0x70f3ff), isFeature: true  },
+      { x:  0.44, y: 1.34, z: -0.48, scale: 1.52, baseColor: new Color(0x70f3ff), hoverColor: new Color(0xffe082), isFeature: true  },
+      { x:  0.52, y: 0.92, z: -0.44, scale: 0.84, baseColor: new Color(0x66f3ff), hoverColor: new Color(0xfff2b2), isFeature: false },
+      { x:  0.24, y: 1.48, z: -0.62, scale: 0.74, baseColor: new Color(0xff99eb), hoverColor: new Color(0x88f7ff), isFeature: false },
 
-      // === 4 LARGER FEATURE SOAP BUBBLES (scale 1.38 – 1.62, radius ~3.0cm to 3.6cm) ===
-      {
-        x: 0.46, y: 1.25, z: -0.46, scale: 1.55,
-        baseColor: new Color(0x70f3ff), // Cyan-Lavender Hero Sphere
-        hoverColor: new Color(0xffe082),
-        isFeature: true,
-      },
-      {
-        x: -0.45, y: 1.32, z: -0.42, scale: 1.44,
-        baseColor: new Color(0xb588ff), // Lavender-Violet Hero Sphere
-        hoverColor: new Color(0xff99eb),
-        isFeature: true,
-      },
-      {
-        x: 0.58, y: 1.42, z: -0.36, scale: 1.62,
-        baseColor: new Color(0xffa3dc), // Pink-Pearl Hero Sphere
-        hoverColor: new Color(0x84ffff),
-        isFeature: true,
-      },
-      {
-        x: -0.05, y: 1.58, z: -0.52, scale: 1.38,
-        baseColor: new Color(0xd8c8ff), // Rainbow Iridescent Crown Sphere
-        hoverColor: new Color(0x70f3ff),
-        isFeature: true,
-      },
+      // === RIGHT SECTOR (comfortable reach + outer ambient depth) ===
+      { x:  0.56, y: 1.14, z: -0.18, scale: 0.96, baseColor: new Color(0xc7b8ff), hoverColor: new Color(0xff99eb), isFeature: false },
+      { x:  0.48, y: 0.84, z:  0.06, scale: 0.82, baseColor: new Color(0x9be7ff), hoverColor: new Color(0xffb8e6), isFeature: false },
+      { x:  0.66, y: 1.44, z: -0.08, scale: 1.46, baseColor: new Color(0xffa3dc), hoverColor: new Color(0x84ffff), isFeature: true  },
+      { x:  0.76, y: 1.24, z:  0.22, scale: 0.88, baseColor: new Color(0xa97dff), hoverColor: new Color(0x88f7ff), isFeature: false },
+      { x:  0.52, y: 1.04, z:  0.26, scale: 0.72, baseColor: new Color(0x66f3ff), hoverColor: new Color(0xff99eb), isFeature: false },
+      { x:  0.46, y: 1.52, z:  0.14, scale: 0.94, baseColor: new Color(0xf599e2), hoverColor: new Color(0x80d8ff), isFeature: false },
+      { x:  0.70, y: 0.90, z: -0.28, scale: 1.04, baseColor: new Color(0xdbf7ff), hoverColor: new Color(0xffe082), isFeature: false },
+
+      // === BACK SECTOR (directly behind user, left-back, right-back, varied elevations) ===
+      { x:  0.28, y: 1.28, z:  0.48, scale: 1.02, baseColor: new Color(0x70f3ff), hoverColor: new Color(0xff99eb), isFeature: false },
+      { x:  0.14, y: 0.90, z:  0.52, scale: 0.80, baseColor: new Color(0xff99eb), hoverColor: new Color(0x88f7ff), isFeature: false },
+      { x: -0.18, y: 1.48, z:  0.46, scale: 1.54, baseColor: new Color(0xb588ff), hoverColor: new Color(0x70f3ff), isFeature: true  },
+      { x:  0.02, y: 1.16, z:  0.62, scale: 0.90, baseColor: new Color(0xc8b6ff), hoverColor: new Color(0xffe082), isFeature: false },
+      { x: -0.36, y: 1.06, z:  0.44, scale: 0.85, baseColor: new Color(0x7af5e8), hoverColor: new Color(0xff99eb), isFeature: false },
+      { x: -0.08, y: 0.82, z:  0.44, scale: 0.74, baseColor: new Color(0xf599e2), hoverColor: new Color(0x88f7ff), isFeature: false },
+      { x:  0.42, y: 1.56, z:  0.56, scale: 0.96, baseColor: new Color(0xa97dff), hoverColor: new Color(0xffe082), isFeature: false },
+      { x: -0.44, y: 1.38, z:  0.64, scale: 1.06, baseColor: new Color(0x9be7ff), hoverColor: new Color(0xff99eb), isFeature: false },
+      { x:  0.18, y: 1.66, z:  0.34, scale: 0.76, baseColor: new Color(0xd8c8ff), hoverColor: new Color(0x70f3ff), isFeature: false },
+
+      // === LEFT SECTOR (comfortable reach + outer ambient depth) ===
+      { x: -0.54, y: 1.20, z: -0.14, scale: 1.48, baseColor: new Color(0xb588ff), hoverColor: new Color(0xff99eb), isFeature: true  },
+      { x: -0.48, y: 0.88, z: -0.26, scale: 0.82, baseColor: new Color(0x7af5e8), hoverColor: new Color(0xe0c3fc), isFeature: false },
+      { x: -0.66, y: 1.46, z:  0.04, scale: 0.98, baseColor: new Color(0xffa8d8), hoverColor: new Color(0x88f7ff), isFeature: false },
+      { x: -0.58, y: 0.96, z:  0.18, scale: 0.74, baseColor: new Color(0x66f3ff), hoverColor: new Color(0xfff2b2), isFeature: false },
+      { x: -0.78, y: 1.26, z: -0.22, scale: 1.04, baseColor: new Color(0xc7b8ff), hoverColor: new Color(0xff99eb), isFeature: false },
+      { x: -0.46, y: 1.56, z: -0.28, scale: 0.86, baseColor: new Color(0xf599e2), hoverColor: new Color(0x80d8ff), isFeature: false },
+      { x: -0.68, y: 1.12, z:  0.34, scale: 1.40, baseColor: new Color(0x70f3ff), hoverColor: new Color(0xffe082), isFeature: true  },
+      { x: -0.32, y: 1.64, z:  0.10, scale: 0.78, baseColor: new Color(0xdbf7ff), hoverColor: new Color(0xff99eb), isFeature: false },
     ];
 
     for (let i = 0; i < configs.length; i++) {
