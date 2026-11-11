@@ -109,6 +109,7 @@ export class SolarSystem {
 
   // Reusable scratch objects to eliminate per-frame allocations
   private scratchVec = new Vector3();
+  private scratchVec2 = new Vector3();
   private scratchHeadPos = new Vector3();
   private scratchHeadQuat = new Quaternion();
   private scratchRayOrigin = new Vector3();
@@ -497,12 +498,22 @@ export class SolarSystem {
       if (this.group.visible) {
         this.group.visible = false;
       }
+      // If user rewinds/seeks back into Phase 2 before transition, allow clean re-reveal & re-anchor
+      if (relativeTime < 165.0 && (this.isRevealed || this.hasAnchored)) {
+        this.isRevealed = false;
+        this.hasAnchored = false;
+      }
       return;
     }
 
+    // Ensure full scale & visibility are always restored (fixes disappearance after reset() or backward seek)
+    if (!this.group.visible) {
+      this.group.visible = true;
+    }
+    this.group.scale.set(1, 1, 1);
+
     if (!this.isRevealed) {
       this.isRevealed = true;
-      this.group.visible = true;
       this.anchorToSeatedUser(world, camera);
       console.log(`[SolarSystem] Phase 3 revealed at relative time ${relativeTime.toFixed(2)}s`);
     }
@@ -594,12 +605,12 @@ export class SolarSystem {
       planet.group.getWorldPosition(this.scratchVec);
 
       // Ray to sphere distance test
-      const toCenter = new Vector3().subVectors(this.scratchVec, rayOrigin);
-      const proj = toCenter.dot(rayDirection);
+      this.scratchVec2.subVectors(this.scratchVec, rayOrigin);
+      const proj = this.scratchVec2.dot(rayDirection);
 
       if (proj <= 0 || proj > maxDistance) continue;
 
-      const perpSq = toCenter.lengthSq() - proj * proj;
+      const perpSq = this.scratchVec2.lengthSq() - proj * proj;
       // Hit radius: planet radius + generous 0.12m margin for effortless ray grab
       const hitRadius = planet.definition.radius + 0.12;
 
@@ -608,6 +619,28 @@ export class SolarSystem {
           closestDist = proj;
           closestPlanet = planet;
         }
+      }
+    }
+
+    return closestPlanet;
+  }
+
+  /**
+   * Proximity sphere check for direct Quest 3S hand-tracking pinch or close controller grab.
+   */
+  hitTestPoint(worldPoint: Vector3, extraMargin = 0.16): PlanetBody | null {
+    if (!this.group.visible) return null;
+
+    let closestPlanet: PlanetBody | null = null;
+    let closestDist = Infinity;
+
+    for (const [, planet] of this.planetRegistry) {
+      planet.group.getWorldPosition(this.scratchVec);
+      const dist = this.scratchVec.distanceTo(worldPoint);
+      const hitRadius = planet.definition.radius + extraMargin;
+      if (dist <= hitRadius && dist < closestDist) {
+        closestDist = dist;
+        closestPlanet = planet;
       }
     }
 

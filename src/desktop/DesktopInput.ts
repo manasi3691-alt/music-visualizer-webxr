@@ -181,6 +181,11 @@ export class DesktopInput {
     if (experienceState.xrState === 'ACTIVE') return;
 
     if (this.isDraggingPlanet && experienceWorld?.solarSystem) {
+      if (this.domElement) {
+        const rect = this.domElement.getBoundingClientRect();
+        this.mouseVec.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouseVec.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      }
       this.planetDragCumulative.x += deltaX * 0.003;
       this.planetDragCumulative.y -= deltaY * 0.003;
       this.raycaster.setFromCamera(this.mouseVec, this.camera);

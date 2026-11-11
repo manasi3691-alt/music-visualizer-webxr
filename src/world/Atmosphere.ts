@@ -31,6 +31,9 @@ export class Atmosphere {
   private skyColor = new Color();
   private equatorColor = new Color();
   private groundColor = new Color();
+  private spaceSkyColor = new Color(0.010, 0.016, 0.045);
+  private spaceEquatorColor = new Color(0.018, 0.028, 0.068);
+  private spaceGroundColor = new Color(0.006, 0.010, 0.028);
 
   constructor() {
     // Large hemisphere dome for smooth gradient sky — radius 35m for the spacious cosmic world
@@ -111,11 +114,24 @@ export class Atmosphere {
   }
 
   update(frameData: ConductorFrameData, metrics: AudioMetrics): void {
-    const { interpolatedColor } = frameData;
+    const { interpolatedColor, relativeTime } = frameData;
 
     this.skyColor.setRGB(...interpolatedColor.sky);
     this.equatorColor.setRGB(...interpolatedColor.equator);
     this.groundColor.setRGB(...interpolatedColor.ground);
+
+    // Phase 2 -> Phase 3 transition (165s -> 175s): deepen sky dome into cosmic void
+    // so the Solar System & starfield become the main environment rather than blue ocean sky
+    const spaceMix = relativeTime >= 165.0
+      ? Math.min(1.0, (relativeTime - 165.0) / 10.0)
+      : 0.0;
+    const smoothSpace = spaceMix * spaceMix * (3 - 2 * spaceMix);
+
+    if (smoothSpace > 0) {
+      this.skyColor.lerp(this.spaceSkyColor, smoothSpace);
+      this.equatorColor.lerp(this.spaceEquatorColor, smoothSpace);
+      this.groundColor.lerp(this.spaceGroundColor, smoothSpace);
+    }
 
     const uniforms = this.domeMaterial.uniforms;
     (uniforms.uSkyColor.value as Color).copy(this.skyColor);
@@ -123,14 +139,19 @@ export class Atmosphere {
     (uniforms.uGroundColor.value as Color).copy(this.groundColor);
 
     // Level C: subtle breathing of horizon intensity with music
-    const microIntensity = interpolatedColor.intensity * (1.0 + metrics.low * 0.04);
+    const baseIntensity = interpolatedColor.intensity * (1.0 - smoothSpace * 0.40);
+    const microIntensity = baseIntensity * (1.0 + metrics.low * 0.04);
     uniforms.uIntensity.value = microIntensity;
 
-    // Horizon glow modulation
+    // Horizon glow fades out smoothly as deep space reveals in Phase 3
+    const horizonFade = 1.0 - smoothSpace;
+    this.horizonRingMesh.visible = horizonFade > 0.01;
     this.horizonMaterial.color.copy(this.equatorColor);
-    this.horizonMaterial.opacity = Math.min(0.45, 0.15 + interpolatedColor.intensity * 0.12 + metrics.mid * 0.05);
+    this.horizonMaterial.opacity = Math.min(0.45, 0.15 + interpolatedColor.intensity * 0.12 + metrics.mid * 0.05) * horizonFade;
 
+    this.groundDiscMesh.visible = horizonFade > 0.01;
     this.groundMaterial.color.copy(this.groundColor);
+    this.groundMaterial.opacity = 0.40 * horizonFade;
   }
 
   dispose(): void {

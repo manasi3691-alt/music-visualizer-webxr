@@ -169,7 +169,7 @@ export class ExperienceApp {
       if (e.code === 'KeyD') {
         this.toggleDebug();
       } else if (e.code === 'KeyR') {
-        if (experienceState.phase === 'COMPLETE' || experienceState.phase === 'PLAYING') {
+        if (experienceState.phase !== 'LOADING' && experienceState.phase !== 'READY' && experienceState.phase !== 'ERROR') {
           this.replay();
         }
       }

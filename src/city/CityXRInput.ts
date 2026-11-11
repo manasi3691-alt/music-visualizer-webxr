@@ -19,6 +19,10 @@ export class CityXRInput {
   private isXRActive = false;
   private activeHand: 'left' | 'right' | null = null;
   private _activeGrabbedBlock: CityBlock | null = null;
+  private planetGrabSpace: Record<'left' | 'right', 'grip' | 'indexTip'> = {
+    left: 'grip',
+    right: 'grip',
+  };
 
   get activeGrabbedBlock(): CityBlock | null {
     return this._activeGrabbedBlock;
@@ -152,17 +156,34 @@ export class CityXRInput {
       return;
     }
 
-    // 1.5 If currently grabbing a planet in the SolarSystem
+    // 1.5 If currently grabbing a planet in the SolarSystem (supports controllers & Quest 3S hand tracking)
     if (experienceWorld?.solarSystem) {
+      const playerAny = this.world.player as any;
       if (experienceWorld.solarSystem.isHoldingPlanet('left') && hasLeft) {
-        this.controllerWorldPos.setFromMatrixPosition(leftGrip.matrixWorld);
-        const headPos = this.world.camera ? this.world.camera.getWorldPosition(new Vector3()) : undefined;
-        experienceWorld.solarSystem.handleGrabUpdate('left', this.controllerWorldPos, headPos);
+        const trackSpace = this.planetGrabSpace.left === 'indexTip'
+          ? (playerAny?.indexTipSpaces?.left || leftGrip)
+          : leftGrip;
+        trackSpace.updateMatrixWorld();
+        this.controllerWorldPos.setFromMatrixPosition(trackSpace.matrixWorld);
+        if (this.world.camera) {
+          this.world.camera.getWorldPosition(this.scratchPos2);
+          experienceWorld.solarSystem.handleGrabUpdate('left', this.controllerWorldPos, this.scratchPos2);
+        } else {
+          experienceWorld.solarSystem.handleGrabUpdate('left', this.controllerWorldPos);
+        }
       }
       if (experienceWorld.solarSystem.isHoldingPlanet('right') && hasRight) {
-        this.controllerWorldPos.setFromMatrixPosition(rightGrip.matrixWorld);
-        const headPos = this.world.camera ? this.world.camera.getWorldPosition(new Vector3()) : undefined;
-        experienceWorld.solarSystem.handleGrabUpdate('right', this.controllerWorldPos, headPos);
+        const trackSpace = this.planetGrabSpace.right === 'indexTip'
+          ? (playerAny?.indexTipSpaces?.right || rightGrip)
+          : rightGrip;
+        trackSpace.updateMatrixWorld();
+        this.controllerWorldPos.setFromMatrixPosition(trackSpace.matrixWorld);
+        if (this.world.camera) {
+          this.world.camera.getWorldPosition(this.scratchPos2);
+          experienceWorld.solarSystem.handleGrabUpdate('right', this.controllerWorldPos, this.scratchPos2);
+        } else {
+          experienceWorld.solarSystem.handleGrabUpdate('right', this.controllerWorldPos);
+        }
       }
     }
 
@@ -227,14 +248,56 @@ export class CityXRInput {
     grip.updateMatrixWorld();
     ray.updateMatrixWorld();
 
-    // Check SolarSystem planet interaction first if SolarSystem is active
+    // Check SolarSystem planet interaction first if SolarSystem is active (controllers & Quest 3S hand tracking)
     if (experienceWorld?.solarSystem?.group.visible) {
-      this.rayOrigin.setFromMatrixPosition(ray.matrixWorld);
-      this.rayDirection.set(0, 0, -1).transformDirection(ray.matrixWorld).normalize();
-      // Test up to 6.5 meters with generous sphere tolerance
-      const hitPlanet = experienceWorld.solarSystem.hitTest(this.rayOrigin, this.rayDirection, 6.5);
+      const playerAny = this.world.player as any;
+      const indexTip = playerAny?.indexTipSpaces?.[handedness];
+      const isHand = Boolean((e.inputSource as any)?.hand);
+
+      // A. Direct hand/controller proximity pinch grab
+      let hitPlanet = null;
+      let grabMode: 'grip' | 'indexTip' = isHand && indexTip ? 'indexTip' : 'grip';
+
+      if (indexTip) {
+        indexTip.updateMatrixWorld();
+        this.scratchPos2.setFromMatrixPosition(indexTip.matrixWorld);
+        if (this.scratchPos2.lengthSq() > 0.0001) {
+          hitPlanet = experienceWorld.solarSystem.hitTestPoint(this.scratchPos2, 0.16);
+          if (hitPlanet) {
+            grabMode = 'indexTip';
+            this.controllerWorldPos.copy(this.scratchPos2);
+          }
+        }
+      }
+
+      if (!hitPlanet) {
+        this.scratchPos2.setFromMatrixPosition(grip.matrixWorld);
+        if (this.scratchPos2.lengthSq() > 0.0001) {
+          hitPlanet = experienceWorld.solarSystem.hitTestPoint(this.scratchPos2, 0.16);
+          if (hitPlanet) {
+            grabMode = 'grip';
+            this.controllerWorldPos.copy(this.scratchPos2);
+          }
+        }
+      }
+
+      // B. Raycast grab fallback (comfortable seated reach up to 6.5m)
+      if (!hitPlanet) {
+        this.rayOrigin.setFromMatrixPosition(ray.matrixWorld);
+        this.rayDirection.set(0, 0, -1).transformDirection(ray.matrixWorld).normalize();
+        hitPlanet = experienceWorld.solarSystem.hitTest(this.rayOrigin, this.rayDirection, 6.5);
+        if (hitPlanet) {
+          const trackSpace = (isHand && indexTip) ? indexTip : grip;
+          trackSpace.updateMatrixWorld();
+          this.controllerWorldPos.setFromMatrixPosition(trackSpace.matrixWorld);
+          if (this.controllerWorldPos.lengthSq() <= 0.0001) {
+            this.controllerWorldPos.copy(this.rayOrigin);
+          }
+        }
+      }
+
       if (hitPlanet) {
-        this.controllerWorldPos.setFromMatrixPosition(grip.matrixWorld);
+        this.planetGrabSpace[handedness] = grabMode;
         const grabbed = experienceWorld.solarSystem.handleGrabStart(handedness, hitPlanet, this.controllerWorldPos);
         if (grabbed) {
           interactionDebugState.logEvent(`planetGrabbed (${hitPlanet.name})`, handedness);

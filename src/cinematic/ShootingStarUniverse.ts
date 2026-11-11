@@ -22,6 +22,7 @@ import {
   SphereGeometry,
   RingGeometry,
   PlaneGeometry,
+  CanvasTexture,
   Color,
   Vector3,
   Quaternion,
@@ -91,6 +92,7 @@ export class ShootingStarUniverse {
   private universeGroup: Group = new Group();
   private universeStars: Points | null = null;
   private nebulaPlanes: Mesh[] = [];
+  private nebulaTexture: CanvasTexture | null = null;
   private universeDust: Points | null = null;
   private universeAlpha = 0; // 0 to 1
 
@@ -310,11 +312,29 @@ export class ShootingStarUniverse {
       { pos: [0, 24, 25], scale: 42, rotZ: 0.0 },
     ];
 
+    // Soft radial falloff texture so nebula clouds blend organically into deep cosmos
+    if (typeof document !== 'undefined') {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+        grad.addColorStop(0.0, 'rgba(255,255,255,1)');
+        grad.addColorStop(0.45, 'rgba(255,255,255,0.45)');
+        grad.addColorStop(1.0, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 128, 128);
+        this.nebulaTexture = new CanvasTexture(canvas);
+      }
+    }
+
     for (let i = 0; i < nebulaTransforms.length; i++) {
       const t = nebulaTransforms[i];
       const nebGeo = new PlaneGeometry(t.scale, t.scale);
       const nebMat = new MeshBasicMaterial({
         color: nebulaColors[i],
+        map: this.nebulaTexture ?? undefined,
         blending: AdditiveBlending,
         transparent: true,
         opacity: 0,
@@ -392,8 +412,21 @@ export class ShootingStarUniverse {
    * Uses relativeTime [0.0 - 38.0s].
    */
   update(deltaSec: number, relativeTime: number, metrics?: AudioMetrics, world?: World, camera?: Camera): void {
+    // If user rewinds/seeks backward before Transition 2, hide star/burst/universe cleanly
+    if (relativeTime < CINEMATIC_TIMELINE.t0_spawn) {
+      if (this.hasTriggeredThisCycle || this.isEventActive || this.universeGroup.visible || this.burstGroup.visible || this.starGroup.visible) {
+        this.hasTriggeredThisCycle = false;
+        this.isEventActive = false;
+        this.universeAlpha = 0;
+        this.starGroup.visible = false;
+        this.burstGroup.visible = false;
+        this.universeGroup.visible = false;
+      }
+      return;
+    }
+
     // Check trigger condition
-    if (relativeTime >= CINEMATIC_TIMELINE.t0_spawn && !this.hasTriggeredThisCycle) {
+    if (!this.hasTriggeredThisCycle) {
       this.trigger(relativeTime, world, camera);
     }
 
@@ -602,6 +635,8 @@ export class ShootingStarUniverse {
       this.nebulaPlanes[i].geometry.dispose();
       (this.nebulaPlanes[i].material as MeshBasicMaterial).dispose();
     }
+    this.nebulaTexture?.dispose();
+    this.nebulaTexture = null;
 
     this.group.clear();
   }

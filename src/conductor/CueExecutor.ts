@@ -38,11 +38,11 @@ export class CueExecutor {
     });
 
     this.eventHandlers.set('CLIMAX', () => {
-      experienceState.setPhase('CLIMAX');
+      // Phase transitions ('UNIVERSE', 'SOLAR_SYSTEM') are driven by MusicalConductor
     });
 
     this.eventHandlers.set('RELEASE', () => {
-      experienceState.setPhase('RELEASE');
+      // Outro state transition is driven by MusicalConductor
     });
 
     this.eventHandlers.set('COMPLETE', () => {
