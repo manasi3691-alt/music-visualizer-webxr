@@ -91,8 +91,8 @@ export class MusicalConductor {
         experienceState.setPhase('SHOOTING_STAR_FROM_OCEAN');
       } else if (relTime >= 165.0 && relTime < 175.0 && experienceState.phase !== 'UNIVERSE') {
         experienceState.setPhase('UNIVERSE');
-      } else if (relTime >= 175.0 && relTime < 250.0 && experienceState.phase !== 'SOLAR_SYSTEM') {
-        experienceState.setPhase('SOLAR_SYSTEM');
+      } else if (relTime >= 175.0 && relTime < 250.0 && experienceState.phase !== 'COSMIC_AWAKENING') {
+        experienceState.setPhase('COSMIC_AWAKENING');
       } else if (relTime >= 250.0 && relTime < 266.92 && experienceState.phase !== 'RELEASE') {
         experienceState.setPhase('RELEASE');
       }

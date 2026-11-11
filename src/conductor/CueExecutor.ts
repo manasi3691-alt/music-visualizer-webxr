@@ -38,7 +38,7 @@ export class CueExecutor {
     });
 
     this.eventHandlers.set('CLIMAX', () => {
-      // Phase transitions ('UNIVERSE', 'SOLAR_SYSTEM') are driven by MusicalConductor
+      // Phase transitions ('UNIVERSE', 'COSMIC_AWAKENING') are driven by MusicalConductor
     });
 
     this.eventHandlers.set('RELEASE', () => {

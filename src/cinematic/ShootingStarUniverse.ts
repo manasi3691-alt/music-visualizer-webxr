@@ -524,8 +524,11 @@ export class ShootingStarUniverse {
       const revealDuration = CINEMATIC_TIMELINE.t4_universe - CINEMATIC_TIMELINE.t2_burst;
       const revealT = Math.max(0, Math.min(1, (relativeTime - CINEMATIC_TIMELINE.t2_burst) / revealDuration));
 
-      // Smoothstep fade for universe
-      this.universeAlpha = revealT * revealT * (3 - 2 * revealT);
+      // Smoothstep fade for universe + gentle fade toward darkness at track ending (254s -> 266.92s)
+      const endFade = relativeTime >= 254.0
+        ? Math.max(0.04, 1.0 - (relativeTime - 254.0) / 12.92)
+        : 1.0;
+      this.universeAlpha = revealT * revealT * (3 - 2 * revealT) * endFade;
 
       const high = metrics?.high ?? 0;
       const energy = metrics?.energy ?? 0;

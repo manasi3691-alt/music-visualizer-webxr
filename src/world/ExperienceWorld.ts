@@ -19,7 +19,7 @@ import { ConductorFrameData } from '../conductor/MusicalConductor.js';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
 import { ShootingStarUniverse } from '../cinematic/ShootingStarUniverse.js';
-import { SolarSystem } from '../cinematic/SolarSystem.js';
+import { CosmicAwakening } from '../cinematic/CosmicAwakening.js';
 import { GlowingFlower } from './GlowingFlower.js';
 import { OceanOfLight } from './OceanOfLight.js';
 import { CosmicFireworks } from './CosmicFireworks.js';
@@ -41,7 +41,7 @@ export class ExperienceWorld {
   readonly cosmicFireworks: CosmicFireworks;
   readonly lightTrails: LightTrails;
   readonly shootingStarUniverse: ShootingStarUniverse;
-  readonly solarSystem: SolarSystem;
+  readonly cosmicAwakening: CosmicAwakening;
   readonly immersiveArchitecture: ImmersiveArchitecture;
   readonly goldenSanctuary: GoldenSanctuary;
   readonly soundBubbles: SoundBubbles;
@@ -63,7 +63,7 @@ export class ExperienceWorld {
     this.lightTrails = new LightTrails(isQuest);
     this.shootingStarUniverse = new ShootingStarUniverse(isQuest);
     this.shootingStarUniverse.setCityRef(this.citySystem.group);
-    this.solarSystem = new SolarSystem(isQuest);
+    this.cosmicAwakening = new CosmicAwakening(isQuest);
     this.immersiveArchitecture = new ImmersiveArchitecture(isQuest);
     this.goldenSanctuary = new GoldenSanctuary(isQuest);
     this.soundBubbles = new SoundBubbles(isQuest);
@@ -81,7 +81,7 @@ export class ExperienceWorld {
     this.rootGroup.add(this.particles.group);
     this.rootGroup.add(this.waves.group);
     this.rootGroup.add(this.shootingStarUniverse.group);
-    this.rootGroup.add(this.solarSystem.group);
+    this.rootGroup.add(this.cosmicAwakening.group);
     this.rootGroup.add(this.immersiveArchitecture.group);
     this.rootGroup.add(this.goldenSanctuary.group);
     this.rootGroup.add(this.soundBubbles.group);
@@ -170,9 +170,15 @@ export class ExperienceWorld {
     this.cosmicFireworks.update(deltaSec, frameData.relativeTime, metrics);
     this.lightTrails.update(deltaSec, frameData.relativeTime, metrics);
 
-    // 3.7 Living Ocean of Light with dynamic firework & trail reflections
-    const fireworkFlashes = this.cosmicFireworks.getActiveFlashes();
-    this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics, fireworkFlashes);
+    // 3.65 Climax & Finale: Shooting star universe + THE COSMIC AWAKENING (161s -> 266.92s)
+    this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, metrics, world, camera);
+    this.cosmicAwakening.update(deltaSec, frameData.relativeTime, metrics, world, camera);
+
+    // 3.7 Living Ocean of Light with dynamic Phase 2 firework & Phase 3 Cosmic Awakening reflections
+    const oceanFlashes = frameData.relativeTime >= 175.0
+      ? this.cosmicAwakening.getActiveFlashes()
+      : this.cosmicFireworks.getActiveFlashes();
+    this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics, oceanFlashes);
 
     // 3.7 WebXR controller proximity interactions (ocean surface reach)
     if (world?.renderer?.xr?.isPresenting) {
@@ -199,12 +205,6 @@ export class ExperienceWorld {
 
     // 6. Sound bubbles (reachable pearlescent droplets + VR interaction)
     this.soundBubbles.update(frameData, metrics, deltaSec, world);
-
-    // 7. Climax event: Shooting star & Universe transition
-    this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, metrics, world, camera);
-
-    // 8. Interactive 3D Solar System (reveals after universe transition)
-    this.solarSystem.update(deltaSec, frameData.relativeTime, metrics, world, camera);
   }
 
   reset(): void {
@@ -216,7 +216,7 @@ export class ExperienceWorld {
     this.cosmicFireworks.reset();
     this.lightTrails.reset();
     this.shootingStarUniverse.reset();
-    this.solarSystem.reset();
+    this.cosmicAwakening.reset();
     this.immersiveArchitecture.reset();
     this.goldenSanctuary.reset();
     this.soundBubbles.reset();
@@ -235,7 +235,7 @@ export class ExperienceWorld {
     this.particles.dispose();
     this.lighting.dispose();
     this.shootingStarUniverse.dispose();
-    this.solarSystem.dispose();
+    this.cosmicAwakening.dispose();
     this.immersiveArchitecture.dispose();
     this.goldenSanctuary.dispose();
     this.soundBubbles.dispose();
