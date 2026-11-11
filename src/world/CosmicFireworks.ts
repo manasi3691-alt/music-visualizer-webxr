@@ -1,23 +1,24 @@
 /**
  * CosmicFireworks: 360° celestial fireworks spectacle for Phase 2 (Crystal Lotus & Cosmic Ocean).
  *
- * Features:
- *  - 360° distribution at varied azimuths, elevations (10° to 75°), and distances (15m to 55m).
- *  - Palette: cyan, turquoise, violet, lavender, pink, rose gold, golden-white.
- *  - Glowing core flashes, detailed radial particle bursts, sparkling fragments, and lingering willow trails.
- *  - Music synchronised:
- *      * Bass kicks trigger powerful bursts and core expansions.
- *      * Musical climaxes trigger grand multi-burst simultaneous fireworks in 360°.
- *      * Quiet passages feature delicate, solitary distant bursts.
- *  - High performance: single pooled BufferGeometry, zero per-frame heap allocations, Quest 3S optimized.
- *  - Feeds active burst positions and colors to OceanOfLight for surface reflections.
+ * Visual & Musical Design:
+ *  - Inactive during initial Phase 2 lotus arrival & bubble discovery (t < 82s).
+ *  - Introduces gently (82s - 112s), builds into grand multi-burst 360° display during
+ *    the musical climax (112s - 158s, peaking 130s - 158s), and dissolves into tiny
+ *    lingering sparkling glitter particles after the climax (158s - 175s).
+ *  - Covers the full 360° sky (front, behind, left, right, horizon, and high overhead).
+ *  - Mixes large detailed explosions (chrysanthemum, willow, double-ring) with smaller starbursts.
+ *  - Uses cyan, turquoise, blue, lavender, violet, pink, magenta, and golden-white.
+ *  - Three pooled GPU draw calls (glowing cores, curved 3D streamer trails, twinkling glitter embers)
+ *    with zero per-frame heap allocations, optimized for Meta Quest 3S & Desktop.
  */
 
 import {
   Group,
   Points,
+  LineSegments,
   BufferGeometry,
-  Float32BufferAttribute,
+  BufferAttribute,
   ShaderMaterial,
   Color,
   Vector3,
@@ -31,61 +32,104 @@ export interface FireworkFlash {
   intensity: number;
 }
 
+type ShellStyle = 'chrysanthemum' | 'willow' | 'starburst' | 'double_ring';
+
 interface FireworkShell {
   active: boolean;
-  type: 'peony' | 'willow' | 'chrysanthemum' | 'double_ring';
+  style: ShellStyle;
+  isLarge: boolean;
   center: Vector3;
   primaryColor: Color;
   secondaryColor: Color;
   age: number;
   maxLife: number;
-  coreRadius: number;
   coreIntensity: number;
-  particleStartIndex: number;
-  particleCount: number;
+  coreSize: number;
+  rayCount: number;
+  rayOffset: number;
+  glitterStart: number;
+  glitterCount: number;
   gravity: number;
   drag: number;
+  trailSampleAccum: number;
+  glitterSpawned: boolean;
 }
 
-const FIREWORK_PALETTE = [
-  { primary: new Color(0x00f2fe), secondary: new Color(0x38ef7d) }, // Cyan & Turquoise
-  { primary: new Color(0x1de9b6), secondary: new Color(0xfff2b2) }, // Turquoise & Golden-White
-  { primary: new Color(0x8a2be2), secondary: new Color(0xb39ddb) }, // Violet & Lavender
-  { primary: new Color(0xb39ddb), secondary: new Color(0xff77e9) }, // Lavender & Pink
-  { primary: new Color(0xff77e9), secondary: new Color(0xf4a4a8) }, // Pink & Rose Gold
-  { primary: new Color(0xf4a4a8), secondary: new Color(0xfff2b2) }, // Rose Gold & Golden-White
-  { primary: new Color(0xfff2b2), secondary: new Color(0x00e5ff) }, // Golden-White & Cyan
+const FIREWORK_PALETTE: { primary: Color; secondary: Color; core: Color }[] = [
+  { primary: new Color(0x00f2fe), secondary: new Color(0x1de9b6), core: new Color(0xe0ffff) }, // Cyan & Turquoise
+  { primary: new Color(0x3b82f6), secondary: new Color(0x00f2fe), core: new Color(0xdbeafe) }, // Electric Blue & Cyan
+  { primary: new Color(0x8a2be2), secondary: new Color(0xb39ddb), core: new Color(0xf3e8ff) }, // Violet & Lavender
+  { primary: new Color(0xb39ddb), secondary: new Color(0xff77e9), core: new Color(0xfff0fb) }, // Lavender & Pink
+  { primary: new Color(0xff77e9), secondary: new Color(0xff2a85), core: new Color(0xffe4f3) }, // Pink & Magenta
+  { primary: new Color(0xff2a85), secondary: new Color(0x9d4edd), core: new Color(0xfff5f9) }, // Magenta & Violet
+  { primary: new Color(0xfff2b2), secondary: new Color(0x00e5ff), core: new Color(0xffffff) }, // Golden-White & Cyan
+  { primary: new Color(0xfff2b2), secondary: new Color(0xff77e9), core: new Color(0xffffff) }, // Golden-White & Pink
 ];
+
+// Timeline thresholds (relativeTime seconds in Phase 2)
+const FIREWORKS_TIMELINE = {
+  tStart: 82.0,       // Keep inactive during initial Phase 2 lotus & bubble discovery
+  tFullStart: 112.0,  // Ramp completes -> full rich display
+  tClimaxStart: 130.0,// Grand multi-shell climax window begins
+  tPostClimax: 158.0, // Stop big shells -> dissolve into tiny sparkling particles
+  tEnd: 175.0,        // Complete fadeout before Phase 3
+};
 
 export class CosmicFireworks {
   readonly group: Group = new Group();
 
   private isQuest: boolean;
   private maxShells: number;
-  private particlesPerShell: number;
-  private totalParticles: number;
+  private maxRaysPerShell: number;
+  private readonly trailPointsPerRay = 8; // 7 connected segments per streamer ray
+  private glitterPerShell: number;
+  private totalGlitter: number;
 
   private shells: FireworkShell[] = [];
 
-  // Pooled geometry & buffers
-  private particleGeo: BufferGeometry;
-  private particleMat: ShaderMaterial;
-  private particlePoints: Points;
+  // 1. Glowing Core Flashes (1 point per shell)
+  private coreGeo: BufferGeometry;
+  private coreMat: ShaderMaterial;
+  private corePoints: Points;
+  private corePositions: Float32Array;
+  private coreColors: Float32Array;
+  private coreAlphas: Float32Array;
+  private coreSizes: Float32Array;
 
-  private positions: Float32Array;
-  private velocities: Float32Array;
-  private colors: Float32Array;
-  private alphas: Float32Array;
-  private sizes: Float32Array;
-  private sparklePhases: Float32Array;
+  // 2. Curved Streamer Trails (LineSegments pool)
+  private trailGeo: BufferGeometry;
+  private trailMat: ShaderMaterial;
+  private trailLines: LineSegments;
+  private trailPositions: Float32Array;     // Render buffer (2 vertices per segment)
+  private trailColors: Float32Array;        // RGB per segment vertex
+  private trailAlphas: Float32Array;        // Alpha per segment vertex
+  private rayHistoryPos: Float32Array;      // 5 xyz history points per ray
+  private rayVel: Float32Array;             // Current velocity per ray
+  private rayPrimaryRGB: Float32Array;      // Color per ray
+  private raySecondaryRGB: Float32Array;
 
-  // Music timing & trigger state
+  // 3. Sparkling Glitter & Trailing Embers (Points pool)
+  private glitterGeo: BufferGeometry;
+  private glitterMat: ShaderMaterial;
+  private glitterPoints: Points;
+  private glitterPos: Float32Array;
+  private glitterVel: Float32Array;
+  private glitterColors: Float32Array;
+  private glitterAlphas: Float32Array;
+  private glitterSizes: Float32Array;
+  private glitterPhases: Float32Array;
+  private glitterAges: Float32Array;
+  private glitterMaxLives: Float32Array;
+
+  // Timing & 360° spawn balancing
   private lastLaunchTime = 0;
-  private launchInterval = 1.8;
   private lastBeatPulse = 0;
+  private postClimaxSparkleAccum = 0;
+  private nextAmbientGlitterCursor = 0;
+  private spawnRegionCursor = 0;
   private masterAlpha = 0;
 
-  // Active flash highlights for ocean reflection
+  // Ocean reflection flashes
   private activeFlashes: FireworkFlash[] = [
     { position: new Vector3(0, 15, -25), color: new Color(0x00f2fe), intensity: 0 },
     { position: new Vector3(-20, 18, -15), color: new Color(0xff77e9), intensity: 0 },
@@ -93,56 +137,169 @@ export class CosmicFireworks {
     { position: new Vector3(0, 22, 25), color: new Color(0xfff2b2), intensity: 0 },
   ];
 
-  // Scratch objects for zero allocation
-  private scratchVec = new Vector3();
+  // Scratch vectors (zero per-frame heap allocations)
+  private scratchPos = new Vector3();
 
   constructor(isQuest = false) {
     this.isQuest = isQuest;
-    this.maxShells = isQuest ? 8 : 14;
-    this.particlesPerShell = isQuest ? 80 : 130;
-    this.totalParticles = this.maxShells * this.particlesPerShell;
+    this.maxShells = isQuest ? 10 : 16;
+    this.maxRaysPerShell = isQuest ? 52 : 84;
+    this.glitterPerShell = isQuest ? 150 : 280;
+    this.totalGlitter = this.maxShells * this.glitterPerShell;
 
-    this.positions = new Float32Array(this.totalParticles * 3);
-    this.velocities = new Float32Array(this.totalParticles * 3);
-    this.colors = new Float32Array(this.totalParticles * 3);
-    this.alphas = new Float32Array(this.totalParticles);
-    this.sizes = new Float32Array(this.totalParticles);
-    this.sparklePhases = new Float32Array(this.totalParticles);
+    const totalRays = this.maxShells * this.maxRaysPerShell;
+    const segsPerRay = this.trailPointsPerRay - 1;
+    const totalLineVerts = totalRays * segsPerRay * 2;
 
-    // Initialize shells pool
+    // ─── Allocate Buffers ──────────────────────────────────────────────────
+    this.corePositions = new Float32Array(this.maxShells * 3);
+    this.coreColors = new Float32Array(this.maxShells * 3);
+    this.coreAlphas = new Float32Array(this.maxShells);
+    this.coreSizes = new Float32Array(this.maxShells);
+
+    this.trailPositions = new Float32Array(totalLineVerts * 3);
+    this.trailColors = new Float32Array(totalLineVerts * 3);
+    this.trailAlphas = new Float32Array(totalLineVerts);
+    this.rayHistoryPos = new Float32Array(totalRays * this.trailPointsPerRay * 3);
+    this.rayVel = new Float32Array(totalRays * 3);
+    this.rayPrimaryRGB = new Float32Array(totalRays * 3);
+    this.raySecondaryRGB = new Float32Array(totalRays * 3);
+
+    this.glitterPos = new Float32Array(this.totalGlitter * 3);
+    this.glitterVel = new Float32Array(this.totalGlitter * 3);
+    this.glitterColors = new Float32Array(this.totalGlitter * 3);
+    this.glitterAlphas = new Float32Array(this.totalGlitter);
+    this.glitterSizes = new Float32Array(this.totalGlitter);
+    this.glitterPhases = new Float32Array(this.totalGlitter);
+    this.glitterAges = new Float32Array(this.totalGlitter);
+    this.glitterMaxLives = new Float32Array(this.totalGlitter);
+
     for (let s = 0; s < this.maxShells; s++) {
       this.shells.push({
         active: false,
-        type: 'peony',
+        style: 'chrysanthemum',
+        isLarge: true,
         center: new Vector3(),
         primaryColor: new Color(),
         secondaryColor: new Color(),
         age: 0,
-        maxLife: 2.5,
-        coreRadius: 0.8,
-        coreIntensity: 0,
-        particleStartIndex: s * this.particlesPerShell,
-        particleCount: this.particlesPerShell,
-        gravity: 0.6,
+        maxLife: 2.8,
+        coreIntensity: 1.0,
+        coreSize: 1.0,
+        rayCount: this.maxRaysPerShell,
+        rayOffset: s * this.maxRaysPerShell,
+        glitterStart: s * this.glitterPerShell,
+        glitterCount: this.glitterPerShell,
+        gravity: 0.7,
         drag: 0.94,
+        trailSampleAccum: 0,
+        glitterSpawned: false,
       });
     }
 
-    // Initialize all particles hidden
-    for (let i = 0; i < this.totalParticles; i++) {
-      this.alphas[i] = 0;
-      this.sizes[i] = isQuest ? 0.08 : 0.12;
-      this.sparklePhases[i] = Math.random() * Math.PI * 2;
+    for (let i = 0; i < this.totalGlitter; i++) {
+      this.glitterPhases[i] = Math.random() * Math.PI * 2;
+      this.glitterMaxLives[i] = 2.0;
     }
 
-    this.particleGeo = new BufferGeometry();
-    this.particleGeo.setAttribute('position', new Float32BufferAttribute(this.positions, 3));
-    this.particleGeo.setAttribute('customColor', new Float32BufferAttribute(this.colors, 3));
-    this.particleGeo.setAttribute('alpha', new Float32BufferAttribute(this.alphas, 1));
-    this.particleGeo.setAttribute('size', new Float32BufferAttribute(this.sizes, 1));
-    this.particleGeo.setAttribute('sparklePhase', new Float32BufferAttribute(this.sparklePhases, 1));
+    // ─── 1. Core Flashes Points ────────────────────────────────────────────
+    this.coreGeo = new BufferGeometry();
+    this.coreGeo.setAttribute('position', new BufferAttribute(this.corePositions, 3));
+    this.coreGeo.setAttribute('customColor', new BufferAttribute(this.coreColors, 3));
+    this.coreGeo.setAttribute('alpha', new BufferAttribute(this.coreAlphas, 1));
+    this.coreGeo.setAttribute('size', new BufferAttribute(this.coreSizes, 1));
 
-    this.particleMat = new ShaderMaterial({
+    this.coreMat = new ShaderMaterial({
+      uniforms: { uMasterAlpha: { value: 0 } },
+      vertexShader: `
+        attribute vec3 customColor;
+        attribute float alpha;
+        attribute float size;
+        uniform float uMasterAlpha;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          vColor = customColor;
+          vAlpha = alpha * uMasterAlpha;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = clamp(size * (1600.0 / max(1.0, -mvPosition.z)), 4.0, 180.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          if (vAlpha <= 0.005) discard;
+          vec2 c = gl_PointCoord - vec2(0.5);
+          float d = length(c);
+          if (d > 0.5) discard;
+
+          // Radiant starburst center flare with vivid hue halo & fine cross-diffraction rays
+          float halo = pow(max(0.0, 1.0 - d * 2.0), 2.1);
+          float hotCore = exp(-d * 20.0) * 1.25;
+          float rayH = max(0.0, 1.0 - abs(c.y) * 22.0) * max(0.0, 1.0 - abs(c.x) * 2.1);
+          float rayV = max(0.0, 1.0 - abs(c.x) * 22.0) * max(0.0, 1.0 - abs(c.y) * 2.1);
+          float rays = (rayH + rayV) * 0.45;
+
+          vec3 col = mix(vColor, vec3(1.0, 0.98, 0.92), clamp(hotCore * 0.72, 0.0, 1.0));
+          float intensity = clamp(halo * 0.70 + hotCore + rays, 0.0, 1.0);
+          gl_FragColor = vec4(col, vAlpha * intensity);
+        }
+      `,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    this.corePoints = new Points(this.coreGeo, this.coreMat);
+    this.corePoints.frustumCulled = false;
+    this.group.add(this.corePoints);
+
+    // ─── 2. Long Curved Streamer Trails LineSegments ────────────────────────
+    this.trailGeo = new BufferGeometry();
+    this.trailGeo.setAttribute('position', new BufferAttribute(this.trailPositions, 3));
+    this.trailGeo.setAttribute('customColor', new BufferAttribute(this.trailColors, 3));
+    this.trailGeo.setAttribute('alpha', new BufferAttribute(this.trailAlphas, 1));
+
+    this.trailMat = new ShaderMaterial({
+      uniforms: { uMasterAlpha: { value: 0 } },
+      vertexShader: `
+        attribute vec3 customColor;
+        attribute float alpha;
+        uniform float uMasterAlpha;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          vColor = customColor;
+          vAlpha = alpha * uMasterAlpha;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          if (vAlpha <= 0.005) discard;
+          gl_FragColor = vec4(vColor, vAlpha);
+        }
+      `,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    this.trailLines = new LineSegments(this.trailGeo, this.trailMat);
+    this.trailLines.frustumCulled = false;
+    this.group.add(this.trailLines);
+
+    // ─── 3. Sparkling Glitter Embers Points ────────────────────────────────
+    this.glitterGeo = new BufferGeometry();
+    this.glitterGeo.setAttribute('position', new BufferAttribute(this.glitterPos, 3));
+    this.glitterGeo.setAttribute('customColor', new BufferAttribute(this.glitterColors, 3));
+    this.glitterGeo.setAttribute('alpha', new BufferAttribute(this.glitterAlphas, 1));
+    this.glitterGeo.setAttribute('size', new BufferAttribute(this.glitterSizes, 1));
+    this.glitterGeo.setAttribute('sparklePhase', new BufferAttribute(this.glitterPhases, 1));
+
+    this.glitterMat = new ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
         uMasterAlpha: { value: 0 },
@@ -158,58 +315,55 @@ export class CosmicFireworks {
 
         varying vec3 vColor;
         varying float vAlpha;
-        varying float vSparkle;
 
         void main() {
           vColor = customColor;
-          // Sparkle twinkle factor
-          float twinkle = 0.75 + 0.25 * sin(uTime * 14.0 + sparklePhase);
+          float twinkle = 0.55 + 0.45 * sin(uTime * 16.0 + sparklePhase);
           vAlpha = alpha * uMasterAlpha * twinkle;
-          vSparkle = sparklePhase;
 
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (260.0 / -mvPosition.z);
-          gl_PointSize = clamp(gl_PointSize, 1.5, 48.0);
+          gl_PointSize = clamp(size * (850.0 / max(1.0, -mvPosition.z)), 2.0, 48.0);
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
       fragmentShader: `
         varying vec3 vColor;
         varying float vAlpha;
-        varying float vSparkle;
 
         void main() {
-          if (vAlpha <= 0.01) discard;
+          if (vAlpha <= 0.005) discard;
+          vec2 c = gl_PointCoord - vec2(0.5);
+          float d = length(c);
+          if (d > 0.5) discard;
 
-          vec2 coord = gl_PointCoord - vec2(0.5);
-          float dist = length(coord);
-          if (dist > 0.5) discard;
+          // Crisp 4-point star glitter diamond + bright center
+          float starX = max(0.0, 1.0 - abs(c.x) * 5.0) * max(0.0, 1.0 - abs(c.y) * 1.9);
+          float starY = max(0.0, 1.0 - abs(c.y) * 5.0) * max(0.0, 1.0 - abs(c.x) * 1.9);
+          float core = exp(-d * 13.0) * 1.5;
+          float glow = pow(1.0 - d * 2.0, 2.0) * 0.6;
+          float a = clamp(max(starX, starY) * 1.1 + core + glow, 0.0, 1.0);
 
-          // Glowing round star particle with brilliant white-hot core
-          float glow = pow(1.0 - dist * 2.0, 1.8);
-          float coreHot = pow(max(0.0, 1.0 - dist * 3.5), 2.5);
-
-          vec3 finalColor = mix(vColor, vec3(1.0, 1.0, 1.0), coreHot * 0.7);
-          gl_FragColor = vec4(finalColor, vAlpha * glow);
+          vec3 col = mix(vColor, vec3(1.0, 0.99, 0.96), clamp(core * 0.75, 0.0, 1.0));
+          gl_FragColor = vec4(col, vAlpha * a);
         }
       `,
       transparent: true,
       blending: AdditiveBlending,
       depthWrite: false,
     });
-
-    this.particlePoints = new Points(this.particleGeo, this.particleMat);
-    this.group.add(this.particlePoints);
+    this.glitterPoints = new Points(this.glitterGeo, this.glitterMat);
+    this.glitterPoints.frustumCulled = false;
+    this.group.add(this.glitterPoints);
 
     this.group.visible = false;
   }
 
   /**
-   * Main per-frame update.
+   * Main per-frame update synchronized with song progression & audio FFT.
    */
   update(deltaSec: number, relativeTime: number, metrics?: AudioMetrics): void {
-    // Phase 2 timing: 55.0s to 165.0s (dissolves to cosmos at 165.0s - 175.0s)
-    if (relativeTime < 55.0 || relativeTime >= 175.0) {
+    // Inactive during Phase 1 and initial Phase 2 lotus + bubble discovery (t < 82s)
+    if (relativeTime < FIREWORKS_TIMELINE.tStart || relativeTime >= FIREWORKS_TIMELINE.tEnd) {
       if (this.group.visible) {
         this.reset();
       }
@@ -218,250 +372,584 @@ export class CosmicFireworks {
 
     this.group.visible = true;
 
-    // Smooth emergence during 55s - 65s, full during 65s - 165s, fade out during 165s - 175s
-    if (relativeTime >= 55.0 && relativeTime <= 65.0) {
-      this.masterAlpha = (relativeTime - 55.0) / 10.0;
-    } else if (relativeTime > 65.0 && relativeTime < 165.0) {
+    const dt = Math.min(0.05, Math.max(0.001, deltaSec));
+
+    // Gradual introduction (82s-112s), full display (112s-158s), gentle fade into sparkles (158s-175s)
+    let introFactor = 1.0;
+    if (relativeTime < FIREWORKS_TIMELINE.tFullStart) {
+      introFactor = (relativeTime - FIREWORKS_TIMELINE.tStart) / (FIREWORKS_TIMELINE.tFullStart - FIREWORKS_TIMELINE.tStart);
+      this.masterAlpha = Math.min(1.0, introFactor * 1.35);
+    } else if (relativeTime < FIREWORKS_TIMELINE.tPostClimax) {
       this.masterAlpha = 1.0;
-    } else if (relativeTime >= 165.0) {
-      this.masterAlpha = Math.max(0, 1.0 - (relativeTime - 165.0) / 10.0);
+    } else {
+      const fadeOut = 1.0 - (relativeTime - FIREWORKS_TIMELINE.tPostClimax) / (FIREWORKS_TIMELINE.tEnd - FIREWORKS_TIMELINE.tPostClimax);
+      this.masterAlpha = Math.max(0, fadeOut);
     }
-    this.particleMat.uniforms.uMasterAlpha.value = this.masterAlpha;
-    this.particleMat.uniforms.uTime.value = relativeTime;
+
+    this.coreMat.uniforms.uMasterAlpha.value = this.masterAlpha;
+    this.trailMat.uniforms.uMasterAlpha.value = relativeTime >= FIREWORKS_TIMELINE.tPostClimax
+      ? this.masterAlpha * Math.max(0, 1.0 - (relativeTime - FIREWORKS_TIMELINE.tPostClimax) / 5.0)
+      : this.masterAlpha;
+    this.glitterMat.uniforms.uMasterAlpha.value = this.masterAlpha;
+    this.glitterMat.uniforms.uTime.value = relativeTime;
 
     const low = metrics?.low ?? 0;
-    const mid = metrics?.mid ?? 0;
     const high = metrics?.high ?? 0;
     const energy = metrics?.energy ?? 0;
     const beat = metrics?.beat ?? 0;
 
-    // Determine launch rhythm based on music structure
-    const isClimaxPrep = relativeTime >= 130.0 && relativeTime <= 165.0;
-    const isClimax = isClimaxPrep || energy > 0.72;
-    const isQuiet = energy < 0.38 && !isClimaxPrep;
+    // ─── Spawning Logic (stopped after climax at 158s) ──────────────────────
+    const isClimaxWindow = relativeTime >= FIREWORKS_TIMELINE.tClimaxStart && relativeTime < FIREWORKS_TIMELINE.tPostClimax;
+    const isPostClimax = relativeTime >= FIREWORKS_TIMELINE.tPostClimax;
 
-    // Dynamic launch cadence
-    if (isClimax) {
-      this.launchInterval = 0.55 - energy * 0.25; // Rapid, grand celebration
-    } else if (isQuiet) {
-      this.launchInterval = 3.2; // Gentle, occasional solitary bursts
-    } else {
-      this.launchInterval = 1.6 - energy * 0.6; // Steady lyrical cadence
-    }
+    if (!isPostClimax) {
+      // Handle backward seeking gracefully
+      if (relativeTime < this.lastLaunchTime) {
+        this.lastLaunchTime = relativeTime - 1.5;
+        this.lastBeatPulse = relativeTime - 1.0;
+      }
 
-    // Trigger launches on beat or timer
-    const timeSinceLast = relativeTime - this.lastLaunchTime;
-    const beatTriggered = beat > 0.58 && relativeTime - this.lastBeatPulse > 0.45;
+      const isPeak = isClimaxWindow || (introFactor > 0.65 && energy > 0.66);
+      const launchInterval = isClimaxWindow
+        ? Math.max(0.42, 0.72 - energy * 0.28)
+        : (3.6 - introFactor * 2.0 - energy * 0.45);
 
-    if (timeSinceLast >= this.launchInterval || (beatTriggered && low > 0.45 && timeSinceLast > 0.35)) {
-      this.lastLaunchTime = relativeTime;
-      if (beatTriggered) this.lastBeatPulse = relativeTime;
+      const timeSinceLast = relativeTime - this.lastLaunchTime;
+      const beatReady = beat > 0.54 && low > 0.40 && (relativeTime - this.lastBeatPulse) > (isClimaxWindow ? 0.38 : 0.65);
 
-      if (isClimax) {
-        // Multi-burst simultaneous salvo in 2 to 4 distinct directions
-        const burstCount = this.isQuest ? 2 : 3;
-        for (let b = 0; b < burstCount; b++) {
-          this.spawnFirework(relativeTime, b, isClimax, low, high);
+      if (timeSinceLast >= launchInterval || (beatReady && timeSinceLast > 0.32)) {
+        this.lastLaunchTime = relativeTime;
+        if (beatReady) this.lastBeatPulse = relativeTime;
+
+        if (isPeak) {
+          // Biggest display during musical climax: 2 to 4 simultaneous 360° bursts
+          const salvoCount = isClimaxWindow ? (this.isQuest ? 2 : 3) : 2;
+          for (let b = 0; b < salvoCount; b++) {
+            const large = b === 0 || Math.random() < 0.65;
+            this.spawnFirework(relativeTime, large, low, high);
+          }
+        } else {
+          // Gradual intro / lyrical verses: alternate smaller starbursts with occasional large bursts
+          const large = introFactor > 0.35 && Math.random() < (0.25 + introFactor * 0.45);
+          this.spawnFirework(relativeTime, large, low, high);
         }
-      } else {
-        // Single focused firework
-        this.spawnFirework(relativeTime, 0, false, low, high);
+      }
+    } else {
+      // Post-climax (158s-175s): seed delicate drifting 360° sparkling particles as shells fade out
+      this.postClimaxSparkleAccum += dt;
+      if (this.postClimaxSparkleAccum >= 0.08 && this.masterAlpha > 0.06) {
+        this.postClimaxSparkleAccum = 0;
+        this.spawnPostClimaxSparkles(this.isQuest ? 6 : 10);
       }
     }
 
-    // Update active shells & particles
+    // ─── Update Active Shells, Trails, Cores & Ocean Reflection Flashes ────
+    const segsPerRay = this.trailPointsPerRay - 1;
     let activeFlashIdx = 0;
+
     for (let s = 0; s < this.maxShells; s++) {
       const shell = this.shells[s];
-      if (!shell.active) continue;
+      if (!shell.active) {
+        this.coreAlphas[s] = 0;
+        continue;
+      }
 
-      shell.age += deltaSec;
+      shell.age += dt;
       const progress = shell.age / shell.maxLife;
 
       if (progress >= 1.0) {
         shell.active = false;
-        // Clear particles
-        for (let p = 0; p < shell.particleCount; p++) {
-          const pIdx = shell.particleStartIndex + p;
-          this.alphas[pIdx] = 0;
-        }
+        this.coreAlphas[s] = 0;
+        this.clearShellTrails(s);
         continue;
       }
 
-      // Record flash for ocean reflections
+      // 1. Core Flash update (rapid initial bloom, soft glow fade)
+      const s3 = s * 3;
+      this.corePositions[s3] = shell.center.x;
+      this.corePositions[s3 + 1] = shell.center.y;
+      this.corePositions[s3 + 2] = shell.center.z;
+
+      let coreFade = 0;
+      if (progress < 0.08) {
+        coreFade = progress / 0.08;
+      } else {
+        coreFade = Math.pow(1.0 - (progress - 0.08) / 0.92, 2.3);
+      }
+      this.coreAlphas[s] = coreFade * shell.coreIntensity;
+      this.coreSizes[s] = shell.coreSize * (0.6 + Math.min(1.0, progress * 3.5) * 0.65);
+
+      // Record top active flashes for OceanOfLight water surface reflections
       if (activeFlashIdx < this.activeFlashes.length) {
         const flash = this.activeFlashes[activeFlashIdx];
         flash.position.copy(shell.center);
         flash.color.copy(shell.primaryColor);
-        // Bright flash early, then fades
-        flash.intensity = (1.0 - progress) * shell.coreIntensity * this.masterAlpha;
+        flash.intensity = coreFade * shell.coreIntensity * this.masterAlpha;
         activeFlashIdx++;
       }
 
-      // Update particles for this shell
-      const start = shell.particleStartIndex;
-      const count = shell.particleCount;
-      const speedDecay = Math.pow(shell.drag, deltaSec * 60.0);
+      // Spawn trailing glitter cluster right as rays blossom (progress ~ 0.14)
+      if (!shell.glitterSpawned && progress >= 0.14) {
+        shell.glitterSpawned = true;
+        this.activateShellGlitter(shell, high, isPostClimax || relativeTime >= 153.0);
+      }
 
-      for (let p = 0; p < count; p++) {
-        const pIdx = start + p;
-        const i3 = pIdx * 3;
+      // 2. Integrate Streamer Ray Heads & Shift History Trail Buffer
+      shell.trailSampleAccum += dt;
+      const shouldShiftHistory = shell.trailSampleAccum >= 0.048;
+      if (shouldShiftHistory) {
+        shell.trailSampleAccum = 0;
+      }
 
-        // Apply velocity with air drag
-        this.velocities[i3] *= speedDecay;
-        this.velocities[i3 + 1] = (this.velocities[i3 + 1] - shell.gravity * deltaSec) * speedDecay;
-        this.velocities[i3 + 2] *= speedDecay;
+      const speedDecay = Math.exp(-shell.drag * dt);
+      // Streamer trails brighten rapidly, linger cleanly, then fade into lingering glitter
+      let trailFade = 1.0;
+      if (progress < 0.07) {
+        trailFade = progress / 0.07;
+      } else if (progress > 0.65) {
+        trailFade = Math.max(0, 1.0 - (progress - 0.65) / 0.35);
+      }
+      if (isPostClimax) {
+        trailFade *= 0.45; // Emphasize tiny sparkling embers over long streamers post-climax
+      }
 
-        this.positions[i3] += this.velocities[i3] * deltaSec;
-        this.positions[i3 + 1] += this.velocities[i3 + 1] * deltaSec;
-        this.positions[i3 + 2] += this.velocities[i3 + 2] * deltaSec;
+      for (let r = 0; r < shell.rayCount; r++) {
+        const globalRay = shell.rayOffset + r;
+        const r3 = globalRay * 3;
 
-        // Particle fade profile: sharp rise, prolonged glimmer, gentle dissolve
-        let alpha = 1.0;
-        if (progress < 0.1) {
-          alpha = progress / 0.1;
-        } else {
-          alpha = Math.pow(1.0 - (progress - 0.1) / 0.9, 1.4);
+        this.rayVel[r3] *= speedDecay;
+        this.rayVel[r3 + 1] = (this.rayVel[r3 + 1] - shell.gravity * dt) * speedDecay;
+        this.rayVel[r3 + 2] *= speedDecay;
+
+        const hBase = globalRay * this.trailPointsPerRay * 3;
+
+        // Shift trail history points backward on sample interval
+        if (shouldShiftHistory) {
+          for (let k = this.trailPointsPerRay - 1; k >= 1; k--) {
+            const dst = hBase + k * 3;
+            const src = hBase + (k - 1) * 3;
+            this.rayHistoryPos[dst] = this.rayHistoryPos[src];
+            this.rayHistoryPos[dst + 1] = this.rayHistoryPos[src + 1];
+            this.rayHistoryPos[dst + 2] = this.rayHistoryPos[src + 2];
+          }
         }
 
-        // High frequency sparkle modulation
-        this.alphas[pIdx] = alpha * (0.85 + high * 0.35);
+        // Advance leading ray tip [0]
+        this.rayHistoryPos[hBase] += this.rayVel[r3] * dt;
+        this.rayHistoryPos[hBase + 1] += this.rayVel[r3 + 1] * dt;
+        this.rayHistoryPos[hBase + 2] += this.rayVel[r3 + 2] * dt;
+
+        // Write connected line segments into trailPositions / trailColors / trailAlphas
+        const lineBaseVert = globalRay * segsPerRay * 2;
+        const pR = this.rayPrimaryRGB[r3];
+        const pG = this.rayPrimaryRGB[r3 + 1];
+        const pB = this.rayPrimaryRGB[r3 + 2];
+        const sR = this.raySecondaryRGB[r3];
+        const sG = this.raySecondaryRGB[r3 + 1];
+        const sB = this.raySecondaryRGB[r3 + 2];
+
+        for (let seg = 0; seg < segsPerRay; seg++) {
+          const v0 = lineBaseVert + seg * 2;
+          const v1 = v0 + 1;
+          const v03 = v0 * 3;
+          const v13 = v1 * 3;
+
+          const p0 = hBase + seg * 3;
+          const p1 = hBase + (seg + 1) * 3;
+
+          this.trailPositions[v03] = this.rayHistoryPos[p0];
+          this.trailPositions[v03 + 1] = this.rayHistoryPos[p0 + 1];
+          this.trailPositions[v03 + 2] = this.rayHistoryPos[p0 + 2];
+
+          this.trailPositions[v13] = this.rayHistoryPos[p1];
+          this.trailPositions[v13 + 1] = this.rayHistoryPos[p1 + 1];
+          this.trailPositions[v13 + 2] = this.rayHistoryPos[p1 + 2];
+
+          const t0 = seg / segsPerRay;
+          const t1 = (seg + 1) / segsPerRay;
+
+          // Tip starts bright primary/white-hot, trailing tail shifts into secondary hue and fades
+          this.trailColors[v03] = pR + (sR - pR) * t0;
+          this.trailColors[v03 + 1] = pG + (sG - pG) * t0;
+          this.trailColors[v03 + 2] = pB + (sB - pB) * t0;
+
+          this.trailColors[v13] = pR + (sR - pR) * t1;
+          this.trailColors[v13 + 1] = pG + (sG - pG) * t1;
+          this.trailColors[v13 + 2] = pB + (sB - pB) * t1;
+
+          this.trailAlphas[v0] = (1.0 - t0 * 0.72) * trailFade * 0.92;
+          this.trailAlphas[v1] = (1.0 - t1 * 0.85) * trailFade * 0.92;
+        }
       }
     }
 
-    // Zero out unused reflection flashes
     for (let f = activeFlashIdx; f < this.activeFlashes.length; f++) {
       this.activeFlashes[f].intensity = 0;
     }
 
-    this.particleGeo.attributes.position.needsUpdate = true;
-    this.particleGeo.attributes.alpha.needsUpdate = true;
+    // ─── 3. Update Sparkling Glitter & Post-Climax Drifting Embers ──────────
+    for (let g = 0; g < this.totalGlitter; g++) {
+      if (this.glitterAlphas[g] <= 0.002 && this.glitterAges[g] <= 0) continue;
+
+      this.glitterAges[g] += dt;
+      const gProg = this.glitterAges[g] / this.glitterMaxLives[g];
+      if (gProg >= 1.0) {
+        this.glitterAlphas[g] = 0;
+        this.glitterAges[g] = 0;
+        continue;
+      }
+
+      const g3 = g * 3;
+      const gDrag = Math.exp((isPostClimax ? -0.90 : -1.35) * dt);
+      const gGrav = isPostClimax ? 0.28 : 0.62;
+
+      this.glitterVel[g3] *= gDrag;
+      this.glitterVel[g3 + 1] = (this.glitterVel[g3 + 1] - gGrav * dt) * gDrag;
+      this.glitterVel[g3 + 2] *= gDrag;
+
+      this.glitterPos[g3] += this.glitterVel[g3] * dt;
+      this.glitterPos[g3 + 1] += this.glitterVel[g3 + 1] * dt;
+      this.glitterPos[g3 + 2] += this.glitterVel[g3 + 2] * dt;
+
+      let gAlpha = 1.0;
+      if (gProg < 0.12) {
+        gAlpha = gProg / 0.12;
+      } else {
+        gAlpha = Math.pow(1.0 - (gProg - 0.12) / 0.88, 1.35);
+      }
+      this.glitterAlphas[g] = gAlpha * (0.85 + high * 0.35);
+    }
+
+    this.coreGeo.attributes.position.needsUpdate = true;
+    this.coreGeo.attributes.alpha.needsUpdate = true;
+    this.coreGeo.attributes.size.needsUpdate = true;
+
+    this.trailGeo.attributes.position.needsUpdate = true;
+    this.trailGeo.attributes.customColor.needsUpdate = true;
+    this.trailGeo.attributes.alpha.needsUpdate = true;
+
+    this.glitterGeo.attributes.position.needsUpdate = true;
+    this.glitterGeo.attributes.alpha.needsUpdate = true;
   }
 
   /**
-   * Spawns a new firework shell in the 360° celestial sphere.
+   * Spawns a new 360° firework shell (large detailed explosion or compact crisp starburst).
    */
   private spawnFirework(
     relativeTime: number,
-    subIndex: number,
-    isClimax: boolean,
+    isLarge: boolean,
     bassBoost: number,
     sparkleBoost: number
   ): void {
-    // Find an inactive shell
-    let targetShell: FireworkShell | null = null;
+    let shellIdx = -1;
     for (let s = 0; s < this.maxShells; s++) {
       if (!this.shells[s].active) {
-        targetShell = this.shells[s];
+        shellIdx = s;
         break;
       }
     }
-    if (!targetShell) return; // Pool full
+    if (shellIdx === -1) return;
 
-    // Choose 360° position around seated viewer
-    // Azimuth: full 360° with slight offset per subIndex
-    const baseAngle = (relativeTime * 0.85 + subIndex * (Math.PI * 0.65) + Math.random() * 0.5) % (Math.PI * 2);
-    // Elevation: 12° to 70° (skyward)
-    const elevation = 0.22 + Math.random() * 0.75;
-    // Distance: varied between 16m and 48m
-    const distance = 16.0 + Math.random() * 32.0;
+    const shell = this.shells[shellIdx];
 
-    const cosElev = Math.cos(elevation);
-    const x = Math.sin(baseAngle) * distance * cosElev;
-    const y = 8.0 + Math.sin(elevation) * distance;
-    const z = Math.cos(baseAngle) * distance * cosElev;
+    // Rotate systematically across 6 distinct 360° sky regions (front, back, left, right, overhead, horizon)
+    const region = this.spawnRegionCursor % 6;
+    this.spawnRegionCursor++;
 
-    targetShell.center.set(x, y, z);
-    targetShell.age = 0;
-    targetShell.active = true;
+    let azimuth = 0;
+    let elevation = 0.45;
+    let distance = 30.0;
 
-    // Shell type selection
-    const typeRoll = Math.random();
-    if (typeRoll < 0.35) {
-      targetShell.type = 'peony';
-      targetShell.maxLife = 2.0 + Math.random() * 0.6;
-      targetShell.gravity = 0.5;
-      targetShell.drag = 0.93;
-    } else if (typeRoll < 0.65) {
-      targetShell.type = 'willow';
-      targetShell.maxLife = 2.8 + Math.random() * 0.8;
-      targetShell.gravity = 0.85;
-      targetShell.drag = 0.95; // Lingering trails
-    } else if (typeRoll < 0.85) {
-      targetShell.type = 'chrysanthemum';
-      targetShell.maxLife = 2.4 + Math.random() * 0.5;
-      targetShell.gravity = 0.6;
-      targetShell.drag = 0.94;
+    if (region === 0) {
+      // Front-Left Sky (frames Crystal Lotus & horizon clearly)
+      azimuth = -Math.PI * (0.08 + Math.random() * 0.26);
+      elevation = 0.12 + Math.random() * 0.24;
+      distance = 22.0 + Math.random() * 18.0;
+    } else if (region === 1) {
+      // Front-Right Sky (frames Crystal Lotus & horizon clearly)
+      azimuth = Math.PI * (0.08 + Math.random() * 0.26);
+      elevation = 0.12 + Math.random() * 0.24;
+      distance = 22.0 + Math.random() * 18.0;
+    } else if (region === 2) {
+      // Behind-Left Sky (discoverable when turning seated chair!)
+      azimuth = -Math.PI * (0.60 + Math.random() * 0.36);
+      elevation = 0.14 + Math.random() * 0.28;
+      distance = 20.0 + Math.random() * 20.0;
+    } else if (region === 3) {
+      // Behind-Right Sky
+      azimuth = Math.PI * (0.60 + Math.random() * 0.36);
+      elevation = 0.14 + Math.random() * 0.28;
+      distance = 20.0 + Math.random() * 20.0;
+    } else if (region === 4) {
+      // High Overhead Canopy
+      azimuth = Math.random() * Math.PI * 2;
+      elevation = 0.55 + Math.random() * 0.58; // ~32° to 65° upward
+      distance = 16.0 + Math.random() * 14.0;
     } else {
-      targetShell.type = 'double_ring';
-      targetShell.maxLife = 2.2 + Math.random() * 0.5;
-      targetShell.gravity = 0.45;
-      targetShell.drag = 0.92;
+      // Wide Horizon Panorama (360° low sky rim)
+      azimuth = (relativeTime * 1.1 + Math.random() * 1.8) % (Math.PI * 2);
+      elevation = 0.10 + Math.random() * 0.14; // ~6° to 14° above horizon
+      distance = 25.0 + Math.random() * 18.0;
     }
 
-    // Palette selection from user-specified colors
-    const palettePair = FIREWORK_PALETTE[Math.floor(Math.random() * FIREWORK_PALETTE.length)];
-    targetShell.primaryColor.copy(palettePair.primary);
-    targetShell.secondaryColor.copy(palettePair.secondary);
+    const cosE = Math.cos(elevation);
+    const cx = Math.sin(azimuth) * distance * cosE;
+    const cy = 2.0 + Math.sin(elevation) * distance;
+    const cz = -Math.cos(azimuth) * distance * cosE; // -Z is forward
 
-    targetShell.coreIntensity = 1.0 + (isClimax ? 0.8 : 0) + bassBoost * 0.6;
+    shell.center.set(cx, cy, cz);
+    shell.active = true;
+    shell.age = 0;
+    shell.isLarge = isLarge;
+    shell.trailSampleAccum = 0;
+    shell.glitterSpawned = false;
 
-    // Distribute particles radiating outward from center
-    const start = targetShell.particleStartIndex;
-    const count = targetShell.particleCount;
-    const explosionSpeed = (7.5 + Math.random() * 5.0 + bassBoost * 3.5) * (targetShell.type === 'willow' ? 0.85 : 1.0);
+    // Choose style
+    if (!isLarge) {
+      shell.style = 'starburst';
+      shell.maxLife = 1.9 + Math.random() * 0.5;
+      shell.gravity = 0.55;
+      shell.drag = 0.92;
+      shell.rayCount = Math.min(this.maxRaysPerShell, this.isQuest ? 24 : 32);
+      shell.coreSize = 1.65;
+    } else {
+      const roll = Math.random();
+      if (roll < 0.42) {
+        shell.style = 'chrysanthemum';
+        shell.maxLife = 2.6 + Math.random() * 0.7;
+        shell.gravity = 0.75;
+        shell.drag = 0.945;
+      } else if (roll < 0.78) {
+        shell.style = 'willow';
+        shell.maxLife = 3.2 + Math.random() * 0.8;
+        shell.gravity = 1.05;
+        shell.drag = 0.955;
+      } else {
+        shell.style = 'double_ring';
+        shell.maxLife = 2.5 + Math.random() * 0.6;
+        shell.gravity = 0.65;
+        shell.drag = 0.935;
+      }
+      shell.rayCount = this.maxRaysPerShell;
+      shell.coreSize = 2.4 + Math.random() * 0.75;
+    }
 
-    for (let p = 0; p < count; p++) {
-      const pIdx = start + p;
-      const i3 = pIdx * 3;
+    const palette = FIREWORK_PALETTE[Math.floor(Math.random() * FIREWORK_PALETTE.length)];
+    shell.primaryColor.copy(palette.primary);
+    shell.secondaryColor.copy(palette.secondary);
+    shell.coreIntensity = (isLarge ? 1.25 : 0.95) + bassBoost * 0.5;
 
-      // Start at explosion center
-      this.positions[i3] = x;
-      this.positions[i3 + 1] = y;
-      this.positions[i3 + 2] = z;
+    // Set core color
+    const s3 = shellIdx * 3;
+    this.coreColors[s3] = palette.core.r;
+    this.coreColors[s3 + 1] = palette.core.g;
+    this.coreColors[s3 + 2] = palette.core.b;
+    this.corePositions[s3] = cx;
+    this.corePositions[s3 + 1] = cy;
+    this.corePositions[s3 + 2] = cz;
+    this.coreAlphas[shellIdx] = 1.0;
 
-      // Radial distribution (Fibonacci sphere or ring)
+    // Clear unused rays if shell uses fewer rays (smaller starburst)
+    if (shell.rayCount < this.maxRaysPerShell) {
+      this.clearTrailingRaysRange(shell.rayOffset + shell.rayCount, shell.rayOffset + this.maxRaysPerShell);
+    }
+
+    // Initialize streamer rays using spherical Fibonacci / double-ring distribution
+    const baseSpeed = isLarge
+      ? (10.5 + Math.random() * 4.5 + bassBoost * 3.0) * (shell.style === 'willow' ? 0.85 : 1.0)
+      : (6.5 + Math.random() * 3.0);
+
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+    // View-facing orthonormal basis from seated origin (0, 1.2, 0) -> shell.center for rosette rings
+    let fx = cx;
+    let fy = cy - 1.2;
+    let fz = cz;
+    const fLen = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1;
+    fx /= fLen; fy /= fLen; fz /= fLen;
+    let rx = -fz;
+    let ry = 0;
+    let rz = fx;
+    const rLen = Math.hypot(rx, rz);
+    if (rLen > 0.01) {
+      rx /= rLen; rz /= rLen;
+    } else {
+      rx = 1; ry = 0; rz = 0;
+    }
+    const ux = fy * rz - fz * ry;
+    const uy = fz * rx - fx * rz;
+    const uz = fx * ry - fy * rx;
+
+    for (let r = 0; r < shell.rayCount; r++) {
+      const globalRay = shell.rayOffset + r;
+      const r3 = globalRay * 3;
+
       let dirX = 0;
       let dirY = 0;
       let dirZ = 0;
+      let speedMul = 1.0;
 
-      if (targetShell.type === 'double_ring') {
-        const isOuterRing = p % 2 === 0;
-        const ringAngle = (p / (count * 0.5)) * Math.PI * 2;
-        const ringRad = isOuterRing ? 1.0 : 0.65;
-        // Tilted ring plane
-        dirX = Math.cos(ringAngle) * ringRad;
-        dirY = Math.sin(ringAngle) * 0.4 * ringRad + (Math.random() - 0.5) * 0.2;
-        dirZ = Math.sin(ringAngle) * ringRad;
+      if (shell.style === 'double_ring') {
+        const isInner = r % 3 === 0;
+        const ringIdx = isInner ? Math.floor(r / 3) : r - Math.floor(r / 3);
+        const ringTotal = isInner ? Math.ceil(shell.rayCount / 3) : shell.rayCount - Math.ceil(shell.rayCount / 3);
+        const angle = (ringIdx / Math.max(1, ringTotal)) * Math.PI * 2;
+        const cA = Math.cos(angle);
+        const sA = Math.sin(angle);
+        const depthJitter = (Math.random() - 0.5) * 0.30;
+        dirX = rx * cA + ux * sA + fx * depthJitter + (Math.random() - 0.5) * 0.06;
+        dirY = ry * cA + uy * sA + fy * depthJitter + (Math.random() - 0.5) * 0.06;
+        dirZ = rz * cA + uz * sA + fz * depthJitter + (Math.random() - 0.5) * 0.06;
+        const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1;
+        dirX /= len; dirY /= len; dirZ /= len;
+        speedMul = isInner ? 0.56 : 1.0;
       } else {
-        // Uniform spherical burst
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(2.0 * Math.random() - 1.0);
-        dirX = Math.sin(phi) * Math.cos(theta);
-        dirY = Math.sin(phi) * Math.sin(theta);
-        dirZ = Math.cos(phi);
+        // Uniform Fibonacci sphere with organic jitter for crisp flower-petal starbursts
+        const y = 1 - (r / Math.max(1, shell.rayCount - 1)) * 2;
+        const rad = Math.sqrt(Math.max(0, 1 - y * y));
+        const theta = goldenAngle * r + (Math.random() - 0.5) * 0.18;
+        dirX = Math.cos(theta) * rad;
+        dirY = y + (Math.random() - 0.5) * 0.10;
+        dirZ = Math.sin(theta) * rad;
+        const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1;
+        dirX /= len; dirY /= len; dirZ /= len;
+        speedMul = 0.85 + Math.random() * 0.30;
       }
 
-      const speedVariation = 0.75 + Math.random() * 0.5;
-      this.velocities[i3] = dirX * explosionSpeed * speedVariation;
-      this.velocities[i3 + 1] = dirY * explosionSpeed * speedVariation;
-      this.velocities[i3 + 2] = dirZ * explosionSpeed * speedVariation;
+      const speed = baseSpeed * speedMul;
+      this.rayVel[r3] = dirX * speed;
+      this.rayVel[r3 + 1] = dirY * speed;
+      this.rayVel[r3 + 2] = dirZ * speed;
 
-      // Color assignment (blend primary and secondary, or tip with golden-white)
-      const colorRatio = Math.random();
-      const col = colorRatio < 0.65 ? targetShell.primaryColor : targetShell.secondaryColor;
-      this.colors[i3] = col.r;
-      this.colors[i3 + 1] = col.g;
-      this.colors[i3 + 2] = col.b;
+      // Initialize all 5 trail history points at explosion center
+      const hBase = globalRay * this.trailPointsPerRay * 3;
+      for (let k = 0; k < this.trailPointsPerRay; k++) {
+        this.rayHistoryPos[hBase + k * 3] = cx;
+        this.rayHistoryPos[hBase + k * 3 + 1] = cy;
+        this.rayHistoryPos[hBase + k * 3 + 2] = cz;
+      }
 
-      this.alphas[pIdx] = 1.0;
-      this.sizes[pIdx] = (this.isQuest ? 0.09 : 0.13) * (0.8 + Math.random() * 0.6 + sparkleBoost * 0.4);
-      this.sparklePhases[pIdx] = Math.random() * Math.PI * 2;
+      // Tip leans slightly golden-white/bright primary, tail flows into secondary color
+      const tipBlend = Math.random() < 0.25 ? 0.45 : 0.18;
+      this.rayPrimaryRGB[r3] = palette.primary.r + (1.0 - palette.primary.r) * tipBlend;
+      this.rayPrimaryRGB[r3 + 1] = palette.primary.g + (1.0 - palette.primary.g) * tipBlend;
+      this.rayPrimaryRGB[r3 + 2] = palette.primary.b + (1.0 - palette.primary.b) * tipBlend;
+
+      this.raySecondaryRGB[r3] = palette.secondary.r;
+      this.raySecondaryRGB[r3 + 1] = palette.secondary.g;
+      this.raySecondaryRGB[r3 + 2] = palette.secondary.b;
     }
 
-    this.particleGeo.attributes.customColor.needsUpdate = true;
-    this.particleGeo.attributes.size.needsUpdate = true;
-    this.particleGeo.attributes.sparklePhase.needsUpdate = true;
+    this.coreGeo.attributes.customColor.needsUpdate = true;
+    this.coreGeo.attributes.size.needsUpdate = true;
+    this.coreGeo.attributes.alpha.needsUpdate = true;
+  }
+
+  /**
+   * Emits sparkling trailing glitter embers along the expanding firework shell rays.
+   */
+  private activateShellGlitter(shell: FireworkShell, highFreq: number, isPostClimax: boolean): void {
+    const count = shell.isLarge ? shell.glitterCount : Math.floor(shell.glitterCount * 0.55);
+
+    for (let i = 0; i < count; i++) {
+      const gIdx = shell.glitterStart + i;
+      const g3 = gIdx * 3;
+
+      // Distribute glitter beads along the streamer ray length from 30% to 105% of tip distance
+      const rayPick = i % shell.rayCount;
+      const globalRay = shell.rayOffset + rayPick;
+      const hBase = globalRay * this.trailPointsPerRay * 3;
+      const r3 = globalRay * 3;
+      const armFraction = 0.28 + ((Math.floor(i / shell.rayCount) + Math.random() * 0.65) / Math.max(1, Math.ceil(count / shell.rayCount))) * 0.78;
+
+      this.glitterPos[g3] = shell.center.x + (this.rayHistoryPos[hBase] - shell.center.x) * armFraction + (Math.random() - 0.5) * 0.35;
+      this.glitterPos[g3 + 1] = shell.center.y + (this.rayHistoryPos[hBase + 1] - shell.center.y) * armFraction + (Math.random() - 0.5) * 0.35;
+      this.glitterPos[g3 + 2] = shell.center.z + (this.rayHistoryPos[hBase + 2] - shell.center.z) * armFraction + (Math.random() - 0.5) * 0.35;
+
+      const velScale = armFraction * (0.78 + Math.random() * 0.25);
+      this.glitterVel[g3] = this.rayVel[r3] * velScale + (Math.random() - 0.5) * 0.9;
+      this.glitterVel[g3 + 1] = this.rayVel[r3 + 1] * velScale + (Math.random() - 0.5) * 0.9;
+      this.glitterVel[g3 + 2] = this.rayVel[r3 + 2] * velScale + (Math.random() - 0.5) * 0.9;
+
+      // Mix golden-white sparkles with shell primary & secondary colors
+      const roll = Math.random();
+      if (roll < 0.35) {
+        // Golden-white shimmer
+        this.glitterColors[g3] = 1.0;
+        this.glitterColors[g3 + 1] = 0.96;
+        this.glitterColors[g3 + 2] = 0.76;
+      } else if (roll < 0.70) {
+        this.glitterColors[g3] = shell.primaryColor.r;
+        this.glitterColors[g3 + 1] = shell.primaryColor.g;
+        this.glitterColors[g3 + 2] = shell.primaryColor.b;
+      } else {
+        this.glitterColors[g3] = shell.secondaryColor.r;
+        this.glitterColors[g3 + 1] = shell.secondaryColor.g;
+        this.glitterColors[g3 + 2] = shell.secondaryColor.b;
+      }
+
+      this.glitterAlphas[gIdx] = 1.0;
+      this.glitterSizes[gIdx] = (this.isQuest ? 0.11 : 0.14) * (isPostClimax ? 0.72 : (0.78 + Math.random() * 0.68 + highFreq * 0.35));
+      this.glitterAges[gIdx] = 0.001;
+      this.glitterMaxLives[gIdx] = (isPostClimax ? 5.2 : 2.3) + Math.random() * 1.4;
+    }
+
+    this.glitterGeo.attributes.customColor.needsUpdate = true;
+    this.glitterGeo.attributes.size.needsUpdate = true;
+  }
+
+  /**
+   * Seeds gentle 360° dissolving glitter sparkles during post-climax (158s-175s).
+   */
+  private spawnPostClimaxSparkles(count: number): void {
+    for (let i = 0; i < count; i++) {
+      const gIdx = this.nextAmbientGlitterCursor % this.totalGlitter;
+      this.nextAmbientGlitterCursor++;
+      if (this.glitterAlphas[gIdx] > 0.15) continue;
+
+      const az = Math.random() * Math.PI * 2;
+      const el = 0.08 + Math.random() * 0.72;
+      const dist = 14.0 + Math.random() * 22.0;
+      const cosE = Math.cos(el);
+      const g3 = gIdx * 3;
+
+      this.glitterPos[g3] = Math.sin(az) * dist * cosE;
+      this.glitterPos[g3 + 1] = 2.5 + Math.sin(el) * dist;
+      this.glitterPos[g3 + 2] = -Math.cos(az) * dist * cosE;
+
+      this.glitterVel[g3] = (Math.random() - 0.5) * 0.6;
+      this.glitterVel[g3 + 1] = -0.25 - Math.random() * 0.45;
+      this.glitterVel[g3 + 2] = (Math.random() - 0.5) * 0.6;
+
+      const palette = FIREWORK_PALETTE[Math.floor(Math.random() * FIREWORK_PALETTE.length)];
+      const col = Math.random() < 0.4 ? palette.core : palette.primary;
+      this.glitterColors[g3] = col.r;
+      this.glitterColors[g3 + 1] = col.g;
+      this.glitterColors[g3 + 2] = col.b;
+
+      this.glitterAlphas[gIdx] = 0.85;
+      this.glitterSizes[gIdx] = (this.isQuest ? 0.09 : 0.11) * (0.65 + Math.random() * 0.6);
+      this.glitterAges[gIdx] = 0.001;
+      this.glitterMaxLives[gIdx] = 2.8 + Math.random() * 1.8;
+    }
+
+    this.glitterGeo.attributes.customColor.needsUpdate = true;
+    this.glitterGeo.attributes.size.needsUpdate = true;
+  }
+
+  private clearShellTrails(shellIdx: number): void {
+    const startRay = shellIdx * this.maxRaysPerShell;
+    this.clearTrailingRaysRange(startRay, startRay + this.maxRaysPerShell);
+  }
+
+  private clearTrailingRaysRange(startRay: number, endRay: number): void {
+    const segsPerRay = this.trailPointsPerRay - 1;
+    for (let r = startRay; r < endRay; r++) {
+      const lineBaseVert = r * segsPerRay * 2;
+      for (let k = 0; k < segsPerRay * 2; k++) {
+        this.trailAlphas[lineBaseVert + k] = 0;
+      }
+    }
   }
 
   /**
@@ -473,24 +961,38 @@ export class CosmicFireworks {
 
   reset(): void {
     this.masterAlpha = 0;
+    this.lastLaunchTime = 0;
+    this.lastBeatPulse = 0;
+    this.postClimaxSparkleAccum = 0;
     this.group.visible = false;
+
     for (let s = 0; s < this.maxShells; s++) {
       this.shells[s].active = false;
+      this.coreAlphas[s] = 0;
     }
-    for (let i = 0; i < this.totalParticles; i++) {
-      this.alphas[i] = 0;
+    for (let i = 0; i < this.trailAlphas.length; i++) {
+      this.trailAlphas[i] = 0;
+    }
+    for (let g = 0; g < this.totalGlitter; g++) {
+      this.glitterAlphas[g] = 0;
+      this.glitterAges[g] = 0;
     }
     for (let f = 0; f < this.activeFlashes.length; f++) {
       this.activeFlashes[f].intensity = 0;
     }
-    if (this.particleGeo.attributes.alpha) {
-      this.particleGeo.attributes.alpha.needsUpdate = true;
-    }
+
+    if (this.coreGeo.attributes.alpha) this.coreGeo.attributes.alpha.needsUpdate = true;
+    if (this.trailGeo.attributes.alpha) this.trailGeo.attributes.alpha.needsUpdate = true;
+    if (this.glitterGeo.attributes.alpha) this.glitterGeo.attributes.alpha.needsUpdate = true;
   }
 
   dispose(): void {
     this.group.clear();
-    this.particleGeo.dispose();
-    this.particleMat.dispose();
+    this.coreGeo.dispose();
+    this.coreMat.dispose();
+    this.trailGeo.dispose();
+    this.trailMat.dispose();
+    this.glitterGeo.dispose();
+    this.glitterMat.dispose();
   }
 }

@@ -133,9 +133,15 @@ export class DesktopInput {
       interactionRegistry.onTouch('primary-ribbon');
     }
 
-    if (interactionRegistry.isGrabAvailable()) {
-      this.isDraggingGrab = true;
-      interactionRegistry.onGrabStart('grab-orb', new Vector3(this.mouseVec.x * 0.5, this.mouseVec.y * 0.5, -1.0));
+    // Only grab the floating orb if the cursor actually hits grabOrbMesh; otherwise drag rotates 360° camera look
+    if (interactionRegistry.isGrabAvailable() && experienceWorld?.structures?.grabOrbMesh) {
+      this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const orbHits = this.raycaster.intersectObject(experienceWorld.structures.grabOrbMesh, true);
+      if (orbHits.length > 0) {
+        this.isDraggingGrab = true;
+        interactionRegistry.onGrabStart('grab-orb', new Vector3(this.mouseVec.x * 0.5, this.mouseVec.y * 0.5, -1.0));
+        return;
+      }
     }
   }
 
