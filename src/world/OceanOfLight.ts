@@ -533,39 +533,26 @@ export class OceanOfLight {
     this.group.visible = true;
 
     // 1. Dissolve fade-in (55.0s -> 65.0s)
-    let waveCalmFactor = 1.0;
     if (relativeTime >= OCEAN_TIMELINE.t_dissolve_start && relativeTime <= OCEAN_TIMELINE.t_dissolve_end) {
       const prog = (relativeTime - OCEAN_TIMELINE.t_dissolve_start) / (OCEAN_TIMELINE.t_dissolve_end - OCEAN_TIMELINE.t_dissolve_start);
       this.oceanAlpha = Math.max(0, Math.min(1, prog));
     } else if (relativeTime > OCEAN_TIMELINE.t_dissolve_end && relativeTime < OCEAN_TIMELINE.t_star_fire) {
       this.oceanAlpha = 1.0;
     }
-    // Transition 2 (165.0s -> 175.0s): ocean currents ascend into the figure while surface calms into cosmic mirror
-    else if (relativeTime >= OCEAN_TIMELINE.t_star_fire && relativeTime < OCEAN_TIMELINE.t_universe) {
+    // Ocean currents stretch upward into sky trails and dissolve into cosmic stars at 165.0s - 175.0s
+    else if (relativeTime >= OCEAN_TIMELINE.t_star_fire) {
       const prog = Math.min(1.0, (relativeTime - OCEAN_TIMELINE.t_star_fire) / (OCEAN_TIMELINE.t_universe - OCEAN_TIMELINE.t_star_fire));
-      this.oceanAlpha = 1.0 - prog * 0.35; // Soften smoothly to 0.65
-      waveCalmFactor = 1.0 - prog * 0.45;
-    }
-    // Phase 3 Cosmic Awakening (175.0s -> 250.0s): calm reflective cosmic ocean beneath the figure
-    else if (relativeTime >= OCEAN_TIMELINE.t_universe && relativeTime < 250.0) {
-      this.oceanAlpha = 0.65;
-      waveCalmFactor = 0.55;
-    }
-    // Final quieter passage & ending (250.0s -> 266.0s): ocean settles still and fades into darkness
-    else {
-      const outroProg = Math.max(0, Math.min(1, (relativeTime - 250.0) / 15.5));
-      waveCalmFactor = Math.max(0, 0.55 * (1.0 - outroProg * 1.15));
-      this.oceanAlpha = Math.max(0, 0.65 * (1.0 - outroProg));
-      if (this.oceanAlpha <= 0.008) {
+      this.oceanAlpha = Math.max(0, 1.0 - prog);
+      if (this.oceanAlpha <= 0.01) {
         this.group.visible = false;
         return;
       }
     }
 
-    const bass = (metrics?.low ?? 0) * waveCalmFactor;
-    const mid = (metrics?.mid ?? 0) * (0.4 + 0.6 * waveCalmFactor);
-    const high = (metrics?.high ?? 0) * (0.4 + 0.6 * waveCalmFactor);
-    const overall = (metrics?.overall ?? 0) * (0.5 + 0.5 * waveCalmFactor);
+    const bass = metrics?.low ?? 0;
+    const mid = metrics?.mid ?? 0;
+    const high = metrics?.high ?? 0;
+    const overall = metrics?.overall ?? 0;
 
     // Update material uniforms with real audio metrics
     this.oceanMaterial.uniforms.uTime.value = relativeTime;
@@ -633,11 +620,9 @@ export class OceanOfLight {
 
     (this.floatingLotuses.material as ShaderMaterial).uniforms.uAlpha.value = this.oceanAlpha;
 
-    // Light curtains fade out cleanly by Phase 3 peak; spray settles gently
-    const curtainFade = relativeTime >= 165.0 ? Math.max(0, 1.0 - (relativeTime - 165.0) / 14.0) : 1.0;
     for (let i = 0; i < this.lightCurtains.length; i++) {
       const mat = this.lightCurtains[i].material as ShaderMaterial;
-      mat.uniforms.uAlpha.value = this.oceanAlpha * curtainFade;
+      mat.uniforms.uAlpha.value = this.oceanAlpha;
       mat.uniforms.uTime.value = relativeTime;
       mat.uniforms.uMid.value = mid;
     }

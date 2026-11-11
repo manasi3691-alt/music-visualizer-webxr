@@ -113,18 +113,15 @@ export class Particles {
       overallOpacity = Math.max(0.15, (1.0 - normalizedProgress) / 0.04 * 0.85);
     }
 
-    // Phase 3 Cosmic Awakening calm attenuation + ending drift into darkness
+    // Phase 3 Solar System calm fade: keep foreground motes subtle so stars & planets dominate
     const phase3Fade = relTime >= 170.0
-      ? 1.0 - Math.min(1.0, (relTime - 170.0) / 8.0) * 0.65
-      : 1.0;
-    const endFade = relTime >= 252.0
-      ? Math.max(0.0, 1.0 - (relTime - 252.0) / 10.0)
+      ? 1.0 - Math.min(1.0, (relTime - 170.0) / 8.0) * 0.78
       : 1.0;
 
     // Highs and mids excite particle opacity and scale smoothly without jitter
     const microJitter = 1.0 + metrics.high * 0.12 + t1Factor * 0.25 + t2Factor * 0.35;
-    this.material.opacity = Math.min(0.95, overallOpacity * (0.8 + metrics.mid * 0.25 + t1Factor * 0.2 + t2Factor * 0.25)) * phase3Fade * endFade;
-    this.material.size = 0.034 * microJitter * (0.68 + 0.32 * phase3Fade);
+    this.material.opacity = Math.min(0.95, overallOpacity * (0.8 + metrics.mid * 0.25 + t1Factor * 0.2 + t2Factor * 0.25)) * phase3Fade;
+    this.material.size = 0.034 * microJitter * (0.62 + 0.38 * phase3Fade);
 
     // Upward flow speed increases during transitions, musical builds, and climaxes
     const transitionSpeed = 1.0 + t1Factor * 0.85 + t2Factor * 1.5;

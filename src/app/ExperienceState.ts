@@ -15,7 +15,7 @@ export type ExperiencePhase =
   | 'OCEAN_ALIVE'
   | 'SHOOTING_STAR_FROM_OCEAN'
   | 'UNIVERSE'
-  | 'COSMIC_AWAKENING'
+  | 'SOLAR_SYSTEM'
   | 'CLIMAX'
   | 'RELEASE'
   | 'COMPLETE'

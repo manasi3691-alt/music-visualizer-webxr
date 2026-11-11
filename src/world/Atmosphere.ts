@@ -138,11 +138,8 @@ export class Atmosphere {
     (uniforms.uEquatorColor.value as Color).copy(this.equatorColor);
     (uniforms.uGroundColor.value as Color).copy(this.groundColor);
 
-    // Level C: subtle breathing of horizon intensity with music + gentle fade to darkness at ending
-    const endDarkFade = relativeTime >= 253.0
-      ? Math.max(0.05, 1.0 - (relativeTime - 253.0) / 13.5)
-      : 1.0;
-    const baseIntensity = interpolatedColor.intensity * (1.0 - smoothSpace * 0.40) * endDarkFade;
+    // Level C: subtle breathing of horizon intensity with music
+    const baseIntensity = interpolatedColor.intensity * (1.0 - smoothSpace * 0.40);
     const microIntensity = baseIntensity * (1.0 + metrics.low * 0.04);
     uniforms.uIntensity.value = microIntensity;
 

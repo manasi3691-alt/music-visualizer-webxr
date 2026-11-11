@@ -19,6 +19,10 @@ export class CityXRInput {
   private isXRActive = false;
   private activeHand: 'left' | 'right' | null = null;
   private _activeGrabbedBlock: CityBlock | null = null;
+  private planetGrabSpace: Record<'left' | 'right', 'grip' | 'indexTip'> = {
+    left: 'grip',
+    right: 'grip',
+  };
 
   get activeGrabbedBlock(): CityBlock | null {
     return this._activeGrabbedBlock;
@@ -152,6 +156,37 @@ export class CityXRInput {
       return;
     }
 
+    // 1.5 If currently grabbing a planet in the SolarSystem (supports controllers & Quest 3S hand tracking)
+    if (experienceWorld?.solarSystem) {
+      const playerAny = this.world.player as any;
+      if (experienceWorld.solarSystem.isHoldingPlanet('left') && hasLeft) {
+        const trackSpace = this.planetGrabSpace.left === 'indexTip'
+          ? (playerAny?.indexTipSpaces?.left || leftGrip)
+          : leftGrip;
+        trackSpace.updateMatrixWorld();
+        this.controllerWorldPos.setFromMatrixPosition(trackSpace.matrixWorld);
+        if (this.world.camera) {
+          this.world.camera.getWorldPosition(this.scratchPos2);
+          experienceWorld.solarSystem.handleGrabUpdate('left', this.controllerWorldPos, this.scratchPos2);
+        } else {
+          experienceWorld.solarSystem.handleGrabUpdate('left', this.controllerWorldPos);
+        }
+      }
+      if (experienceWorld.solarSystem.isHoldingPlanet('right') && hasRight) {
+        const trackSpace = this.planetGrabSpace.right === 'indexTip'
+          ? (playerAny?.indexTipSpaces?.right || rightGrip)
+          : rightGrip;
+        trackSpace.updateMatrixWorld();
+        this.controllerWorldPos.setFromMatrixPosition(trackSpace.matrixWorld);
+        if (this.world.camera) {
+          this.world.camera.getWorldPosition(this.scratchPos2);
+          experienceWorld.solarSystem.handleGrabUpdate('right', this.controllerWorldPos, this.scratchPos2);
+        } else {
+          experienceWorld.solarSystem.handleGrabUpdate('right', this.controllerWorldPos);
+        }
+      }
+    }
+
     // 2. Otherwise, perform targeting/hover detection using controller ray or proximity
     // Check right controller first (preferred dominant hand), then left controller
     let targetedBlock: CityBlock | null = null;
@@ -213,6 +248,64 @@ export class CityXRInput {
     grip.updateMatrixWorld();
     ray.updateMatrixWorld();
 
+    // Check SolarSystem planet interaction first if SolarSystem is active (controllers & Quest 3S hand tracking)
+    if (experienceWorld?.solarSystem?.group.visible) {
+      const playerAny = this.world.player as any;
+      const indexTip = playerAny?.indexTipSpaces?.[handedness];
+      const isHand = Boolean((e.inputSource as any)?.hand);
+
+      // A. Direct hand/controller proximity pinch grab
+      let hitPlanet = null;
+      let grabMode: 'grip' | 'indexTip' = isHand && indexTip ? 'indexTip' : 'grip';
+
+      if (indexTip) {
+        indexTip.updateMatrixWorld();
+        this.scratchPos2.setFromMatrixPosition(indexTip.matrixWorld);
+        if (this.scratchPos2.lengthSq() > 0.0001) {
+          hitPlanet = experienceWorld.solarSystem.hitTestPoint(this.scratchPos2, 0.16);
+          if (hitPlanet) {
+            grabMode = 'indexTip';
+            this.controllerWorldPos.copy(this.scratchPos2);
+          }
+        }
+      }
+
+      if (!hitPlanet) {
+        this.scratchPos2.setFromMatrixPosition(grip.matrixWorld);
+        if (this.scratchPos2.lengthSq() > 0.0001) {
+          hitPlanet = experienceWorld.solarSystem.hitTestPoint(this.scratchPos2, 0.16);
+          if (hitPlanet) {
+            grabMode = 'grip';
+            this.controllerWorldPos.copy(this.scratchPos2);
+          }
+        }
+      }
+
+      // B. Raycast grab fallback (comfortable seated reach up to 6.5m)
+      if (!hitPlanet) {
+        this.rayOrigin.setFromMatrixPosition(ray.matrixWorld);
+        this.rayDirection.set(0, 0, -1).transformDirection(ray.matrixWorld).normalize();
+        hitPlanet = experienceWorld.solarSystem.hitTest(this.rayOrigin, this.rayDirection, 6.5);
+        if (hitPlanet) {
+          const trackSpace = (isHand && indexTip) ? indexTip : grip;
+          trackSpace.updateMatrixWorld();
+          this.controllerWorldPos.setFromMatrixPosition(trackSpace.matrixWorld);
+          if (this.controllerWorldPos.lengthSq() <= 0.0001) {
+            this.controllerWorldPos.copy(this.rayOrigin);
+          }
+        }
+      }
+
+      if (hitPlanet) {
+        this.planetGrabSpace[handedness] = grabMode;
+        const grabbed = experienceWorld.solarSystem.handleGrabStart(handedness, hitPlanet, this.controllerWorldPos);
+        if (grabbed) {
+          interactionDebugState.logEvent(`planetGrabbed (${hitPlanet.name})`, handedness);
+          return;
+        }
+      }
+    }
+
     // If already grabbing city block, ignore additional presses
     if (this._activeGrabbedBlock || !experienceWorld?.citySystem?.group.visible) return;
 
@@ -240,6 +333,13 @@ export class CityXRInput {
   private handleXRInputEnd(e: XRInputSourceEvent, eventType: 'select' | 'squeeze'): void {
     const handedness = (e.inputSource.handedness as 'left' | 'right') || 'right';
     interactionDebugState.logEvent(`${eventType}End (${handedness})`, 'XRInput');
+
+    // Check if releasing a grabbed planet
+    if (experienceWorld?.solarSystem?.isHoldingPlanet(handedness)) {
+      experienceWorld.solarSystem.handleGrabEnd(handedness);
+      interactionDebugState.logEvent(`planetReleased`, handedness);
+      return;
+    }
 
     if (!this._activeGrabbedBlock || !this.interaction) return;
 

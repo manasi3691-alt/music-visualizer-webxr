@@ -3,7 +3,7 @@
  * Three-Phase Journey Timeline:
  *   Phase 1: Rising City (0s – 55s)
  *   Phase 2: Aurora, Crystal Lotus and Cosmic Ocean (55s – 165s, ~1m50s dedicated progression)
- *   Phase 3: Cosmic Ascent & The Cosmic Awakening (165s – 266.92s)
+ *   Phase 3: Cosmic Ascent & Interactive Solar System (165s – 266.92s)
  */
 
 export type CinematicEventType =
@@ -83,12 +83,12 @@ export const CUE_SHEET: CinematicCue[] = [
     description: 'Transition: Climax downbeat. Ocean currents rise upward into flowing light trails and disperse into stars.',
   },
   {
-    id: 'cue-cosmic-awakening',
+    id: 'cue-solar-system',
     relativeTime: 175.0,
     absoluteTime: 175.0,
     event: 'CLIMAX',
     duration: 75.0,
-    description: 'Phase 3: The Cosmic Awakening — colossal ethereal figure forms from prior phases with golden halo and 360° ribbons.',
+    description: 'Phase 3: Interactive Solar System emerges in deep cosmos with full hand grabbing and orbital interaction.',
   },
   {
     id: 'cue-release',
@@ -96,7 +96,7 @@ export const CUE_SHEET: CinematicCue[] = [
     absoluteTime: 250.0,
     event: 'RELEASE',
     duration: 16.92,
-    description: 'Outro: Figure dissolves gently into drifting stardust, ocean calms, and cosmos fades peacefully into darkness.',
+    description: 'Outro: Music gently releases into serene piano chords. Planets settle in tranquil final orbits.',
   },
   {
     id: 'cue-complete',
