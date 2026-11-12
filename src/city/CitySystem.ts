@@ -349,6 +349,27 @@ export class CitySystem {
     const { activeCue, relativeTime, normalizedProgress, interpolatedColor } = frameData;
     this.currentEvent = activeCue.event;
 
+    // 0. Transition 1: Continuous dissolution of Phase 1 City into Phase 2
+    if (relativeTime >= 65.0) {
+      if (this.group.visible) {
+        this.group.visible = false;
+        this.group.scale.set(0.001, 0.001, 0.001);
+      }
+      return;
+    }
+
+    if (relativeTime >= 55.0) {
+      this.group.visible = true;
+      const dissolveT = Math.max(0, Math.min(1, (relativeTime - 55.0) / 10.0));
+      // Smoothstep easing for continuous organic dissolving
+      const ease = dissolveT * dissolveT * (3.0 - 2.0 * dissolveT);
+      const scale = Math.max(0.001, 1.0 - ease);
+      this.group.scale.set(scale, scale, scale);
+    } else {
+      this.group.visible = true;
+      this.group.scale.set(1.0, 1.0, 1.0);
+    }
+
     // 1. Phased cinematic progression & district activation
     this.updatePhasedProgression(activeCue.event, relativeTime);
 
@@ -470,6 +491,10 @@ export class CitySystem {
     this.hasActivatedDevelopment = false;
     this.hasActivatedBuild = false;
     this.hasActivatedClimax = false;
+
+    // Restore visibility and scale
+    this.group.visible = true;
+    this.group.scale.set(1.0, 1.0, 1.0);
 
     // Reset interaction & blocks
     this.interaction.reset();

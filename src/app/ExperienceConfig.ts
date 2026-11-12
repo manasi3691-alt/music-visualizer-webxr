@@ -13,28 +13,30 @@ export interface ColorStop {
 }
 
 export const EXPERIENCE_CONFIG = {
-  projectTitle: 'EXPERIENCE',
-  composer: 'Ludovico Einaudi',
-  audioPath: './audio/experience.mp3',
+  projectTitle: 'A SKY FULL OF STARS',
+  composer: 'The Hit Crew Kids / Coldplay',
+  audioPath: './audio/sky_full_of_stars.mp3',
 
-  // Authored musical excerpt from the real recording (38.0s duration)
-  // 240.0s (4:00) downbeat through 278.0s (4:38) sudden release and piano decay
+  // Full continuous audio track journey (266.92s / ~4m 27s):
+  // Phase 1 (Rising City): 0s – 55s
+  // Phase 2 (Aurora, Lotus & Cosmic Ocean): 55s – 165s (~1m50s)
+  // Phase 3 (Cosmic Ascent & Interactive Solar System): 165s – 266.92s
   excerpt: {
-    sourceStart: 240.0,
-    sourceEnd: 278.0,
-    duration: 38.0,
+    sourceStart: 0.0,
+    sourceEnd: 266.92,
+    duration: 266.92,
   },
 
   // Cosmic color progression per musical movement
   // Palette: midnight blue · deep charcoal · muted teal · ivory · restrained gold
   colors: {
     arrival: {
-      sky:           [0.05, 0.09, 0.18],   // Deep midnight blue
-      equator:       [0.08, 0.14, 0.26],   // Indigo horizon
-      ground:        [0.03, 0.05, 0.09],   // Near-black charcoal
-      primaryAccent: [0.45, 0.62, 0.80],   // Dusty blue-ivory
-      warmAccent:    [0.78, 0.72, 0.60],   // Muted warm ivory
-      intensity: 0.75,
+      sky:           [0.04, 0.07, 0.15],   // Deep midnight blue — quieter than before
+      equator:       [0.06, 0.11, 0.22],   // Indigo horizon
+      ground:        [0.02, 0.04, 0.08],   // Near-black charcoal
+      primaryAccent: [0.38, 0.52, 0.72],   // Dusty blue-ivory
+      warmAccent:    [0.68, 0.62, 0.52],   // Muted warm ivory
+      intensity: 0.55,
     } as ColorStop,
 
     discovery: {

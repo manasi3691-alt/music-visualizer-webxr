@@ -224,6 +224,31 @@ export class WristUI {
     const d = WRIST_UI_DIMENSIONS.depth;
     const zFront = d * 0.5 + 0.001;
 
+    // ── DEPTH LAYER 0: Shadow backing disc (deepest layer, gives 3D presence) ──
+    // A slightly larger, very dark disc behind the main panel to create depth shadow
+    const shadowDiscShape = new Shape();
+    shadowDiscShape.absarc(0, 0, r * 1.08, 0, Math.PI * 2, false);
+    const shadowExtrudeSettings = {
+      depth: d * 0.4,
+      bevelEnabled: false,
+      curveSegments: 32,
+    };
+    const shadowGeo = new ExtrudeGeometry(shadowDiscShape, shadowExtrudeSettings);
+    shadowGeo.center();
+    this.disposableGeometries.push(shadowGeo);
+    const shadowMat = new MeshBasicMaterial({
+      color: new Color(0x020408),
+      transparent: true,
+      opacity: 0.80,
+      depthWrite: false,
+    });
+    this.disposableMaterials.push(shadowMat);
+    const shadowMesh = new Mesh(shadowGeo, shadowMat);
+    shadowMesh.name = 'WristUI_ShadowBacking';
+    shadowMesh.position.z = -d * 0.5 - 0.002;
+    this.panelContainer.add(shadowMesh);
+    this.controlMaterials.push({ material: shadowMat, baseOpacity: 0.80 });
+
     // 1. Base circular panel (disc extrusion)
     const discShape = new Shape();
     discShape.absarc(0, 0, r, 0, Math.PI * 2, false);
@@ -255,13 +280,14 @@ export class WristUI {
     this.panelMesh.name = 'WristUI_BasePanel';
     this.panelContainer.add(this.panelMesh);
 
-    // 2. Border torus ring (glowing outer edge)
-    const torusGeo = new TorusGeometry(r, 0.0015, 8, 48);
+    // 2. Border torus ring (glowing outer edge) — DOUBLED for premium depth
+    // Outer bright ring
+    const torusGeo = new TorusGeometry(r, 0.0022, 8, 64);
     this.disposableGeometries.push(torusGeo);
     this.borderMaterial = new MeshBasicMaterial({
       color: new Color(WRIST_UI_PALETTE.borderEmissive),
       transparent: true,
-      opacity: 0.80,
+      opacity: 0.90,
     });
     this.disposableMaterials.push(this.borderMaterial);
     this.borderLine = new Mesh(torusGeo, this.borderMaterial);
@@ -269,13 +295,48 @@ export class WristUI {
     this.borderLine.position.z = d * 0.5 + 0.0005;
     this.panelContainer.add(this.borderLine);
 
+    // Inner gold accent ring (behind border — creates layered glow depth)
+    const goldRingGeo = new TorusGeometry(r * 0.88, 0.0012, 8, 48);
+    this.disposableGeometries.push(goldRingGeo);
+    const goldRingMat = new MeshBasicMaterial({
+      color: new Color(WRIST_UI_PALETTE.goldAccent),
+      transparent: true,
+      opacity: 0.55,
+    });
+    this.disposableMaterials.push(goldRingMat);
+    const goldRingMesh = new Mesh(goldRingGeo, goldRingMat);
+    goldRingMesh.name = 'WristUI_GoldAccentRing';
+    goldRingMesh.position.z = d * 0.5;
+    this.panelContainer.add(goldRingMesh);
+    this.controlMaterials.push({ material: goldRingMat, baseOpacity: 0.55 });
+
+    // ── DEPTH LAYER: Edge light strips (3 teal dots around the perimeter) ──
+    // These give the panel a sci-fi lighted rim feeling
+    const edgeDotPositions = [0, Math.PI * 2 / 3, Math.PI * 4 / 3];
+    edgeDotPositions.forEach((angle, idx) => {
+      const ex = Math.cos(angle) * r;
+      const ey = Math.sin(angle) * r;
+      const dotGeo = new CircleGeometry(0.004, 8);
+      this.disposableGeometries.push(dotGeo);
+      const dotMat = new MeshBasicMaterial({
+        color: new Color(idx === 1 ? WRIST_UI_PALETTE.goldAccent : WRIST_UI_PALETTE.borderEmissive),
+        transparent: true,
+        opacity: 0.95,
+      });
+      this.disposableMaterials.push(dotMat);
+      this.controlMaterials.push({ material: dotMat, baseOpacity: 0.95 });
+      const dotMesh = new Mesh(dotGeo, dotMat);
+      dotMesh.position.set(ex, ey, d * 0.5 + 0.002);
+      this.panelContainer.add(dotMesh);
+    });
+
     // 3. Inner glow ring (subtle, smaller torus)
-    const innerTorusGeo = new TorusGeometry(r * 0.75, 0.001, 8, 48);
+    const innerTorusGeo = new TorusGeometry(r * 0.75, 0.0012, 8, 48);
     this.disposableGeometries.push(innerTorusGeo);
     this.glowRingMaterial = new MeshBasicMaterial({
       color: new Color(WRIST_UI_PALETTE.tealAccent),
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.45,
     });
     this.disposableMaterials.push(this.glowRingMaterial);
     this.glowRingMesh = new Mesh(innerTorusGeo, this.glowRingMaterial);

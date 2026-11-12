@@ -26,30 +26,32 @@ export class CityLighting {
   }
 
   update(frameData: ConductorFrameData, metrics: AudioMetrics): void {
-    const { interpolatedColor, normalizedProgress } = frameData;
+    const { interpolatedColor, relativeTime } = frameData;
 
-    // 1. Phased base intensity:
-    // CALM (0-0.10): soft minimal (0.3)
-    // DISCOVERY (0.10-0.26): subtle highlights (0.45)
-    // DEVELOPMENT (0.26-0.47): pathways illuminate (0.65)
-    // BUILD (0.47-0.81): city glow grows (0.95)
-    // CLIMAX (0.81-0.97): brilliant warm bloom (1.5)
-    // RELEASE (0.97-1.0): soft peaceful glow (0.4)
+    // Phase 1 progression (0.0s to 55.0s):
+    // 0-18s: Calm piano intro (soft minimal illumination ~0.35)
+    // 18-36s: Vocals enter (warm architectural highlights ~0.65)
+    // 36-55s: Full groove build (vibrant expansive illumination ~1.10)
     let phaseIntensity = 0.35;
-    if (normalizedProgress >= 0.10 && normalizedProgress < 0.26) {
-      phaseIntensity = 0.45;
-    } else if (normalizedProgress >= 0.26 && normalizedProgress < 0.47) {
-      phaseIntensity = 0.65;
-    } else if (normalizedProgress >= 0.47 && normalizedProgress < 0.81) {
-      phaseIntensity = 0.95;
-    } else if (normalizedProgress >= 0.81 && normalizedProgress < 0.97) {
-      phaseIntensity = 1.45;
-    } else if (normalizedProgress >= 0.97) {
-      phaseIntensity = 0.40;
+    if (relativeTime >= 18.0 && relativeTime < 36.0) {
+      const p = (relativeTime - 18.0) / 18.0;
+      phaseIntensity = 0.35 + p * 0.30;
+    } else if (relativeTime >= 36.0 && relativeTime < 55.0) {
+      const p = (relativeTime - 36.0) / 19.0;
+      phaseIntensity = 0.65 + p * 0.45;
+    } else if (relativeTime >= 55.0) {
+      // Transition dissolve
+      const dissolveP = Math.min(1.0, (relativeTime - 55.0) / 10.0);
+      phaseIntensity = Math.max(0.0, 1.10 * (1.0 - dissolveP));
     }
 
-    // 2. Micro FFT pulse (subtle 2-4% shimmer)
-    const microPulse = 1.0 + metrics.mid * 0.04 + metrics.high * 0.02;
+    const mid = metrics?.mid ?? 0;
+    const high = metrics?.high ?? 0;
+    const energy = metrics?.energy ?? 0;
+    const beat = metrics?.beat ?? 0;
+
+    // Musical dynamics: vocal & piano chords add warm light; beats give subtle punch
+    const musicMod = 0.85 + mid * 0.25 + energy * 0.25 + beat * 0.15;
 
     this.scratchColor.setRGB(
       interpolatedColor.primaryAccent[0],
@@ -58,7 +60,7 @@ export class CityLighting {
     );
 
     this.cityAccentLight.color.copy(this.scratchColor);
-    this.cityAccentLight.intensity = phaseIntensity * microPulse;
+    this.cityAccentLight.intensity = phaseIntensity * musicMod;
   }
 
   reset(): void {

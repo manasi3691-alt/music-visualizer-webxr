@@ -101,22 +101,30 @@ export class Structures {
   }
 
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number): void {
-    const { normalizedProgress, interpolatedColor } = frameData;
+    const { relativeTime, interpolatedColor } = frameData;
 
-    // Arcs are the primary framing element — emerge earlier than buildings (from DISCOVERY)
-    // Outer arcs (higher index) emerge later for layered depth effect
+    if (relativeTime >= 65.0) {
+      if (this.group.visible) {
+        this.group.visible = false;
+      }
+      return;
+    }
+    this.group.visible = true;
+
+    // Arcs emerge progressively during Phase 1 (0s to 55s)
     const arcVisibilities = [
-      // Inner teal arc: emerges at 10%, full by 25%
-      Math.max(0, Math.min(1, (normalizedProgress - 0.10) / 0.15)),
-      // Mid arc: emerges at 20%, full by 38%
-      Math.max(0, Math.min(1, (normalizedProgress - 0.20) / 0.18)),
-      // Outer gold arc: emerges at 32%
-      Math.max(0, Math.min(1, (normalizedProgress - 0.32) / 0.20)),
-      // Distant silhouette: emerges at 50% (BUILD phase)
-      Math.max(0, Math.min(1, (normalizedProgress - 0.50) / 0.22)),
+      // Inner teal arc: emerges from start (0s - 14s)
+      Math.max(0, Math.min(1, relativeTime / 14.0)),
+      // Mid arc: emerges at 14s - 28s
+      Math.max(0, Math.min(1, (relativeTime - 14.0) / 14.0)),
+      // Outer gold arc: emerges at 28s - 42s
+      Math.max(0, Math.min(1, (relativeTime - 28.0) / 14.0)),
+      // Distant silhouette: emerges at 40s - 52s
+      Math.max(0, Math.min(1, (relativeTime - 40.0) / 12.0)),
     ];
-    // All arcs dissolve after 97%
-    const dissolve = normalizedProgress >= 0.97 ? Math.max(0, (1.0 - normalizedProgress) / 0.03) : 1.0;
+
+    // Smooth dissolution into stardust and aurora at 55.0s - 65.0s
+    const dissolve = relativeTime >= 55.0 ? Math.max(0, 1.0 - (relativeTime - 55.0) / 10.0) : 1.0;
 
     const lowPulse  = 1.0 + metrics.low  * 0.025;
     const midPulse  = 1.0 + metrics.mid  * 0.015;
@@ -134,17 +142,17 @@ export class Structures {
         const pulsed = vis * (i < 2 ? lowPulse : midPulse);
         arc.scale.set(pulsed, pulsed, pulsed);
         this.arcMaterials[i].opacity = vis * arcOpacities[i];
-        // Let conductor color subtly tint emissive (only 20% blend, rest stays cosmic)
+        // Let conductor color subtly tint emissive
         this.scratchEmissive.setHex(arcBaseColors[i]);
         this.arcMaterials[i].emissive.copy(this.scratchEmissive);
         this.arcMaterials[i].emissiveIntensity = 0.10 + (i < 3 ? metrics.mid : metrics.low) * 0.12;
       }
-      // Extremely gentle sway (motion budget < 0.04 rad/s)
+      // Extremely gentle sway
       arc.rotation.z += deltaSec * (0.012 * (i % 2 === 0 ? 1 : -1));
     });
 
-    // Grab Orb: visible from Development phase onward
-    const orbVis = Math.max(0, Math.min(1, (normalizedProgress - 0.26) / 0.12)) * dissolve;
+    // Grab Orb: visible during Phase 1 (18s to 55s), dissolves into Phase 2
+    const orbVis = Math.max(0, Math.min(1, (relativeTime - 18.0) / 12.0)) * dissolve;
     if (orbVis > 0.01) {
       const orbScale = orbVis * (1.0 + metrics.mid * 0.04);
       this.grabOrbMesh.scale.set(orbScale, orbScale, orbScale);
@@ -155,6 +163,15 @@ export class Structures {
       this.grabOrbMesh.scale.set(0.001, 0.001, 0.001);
       this.grabOrbMaterial.opacity = 0;
     }
+  }
+
+  reset(): void {
+    this.group.visible = true;
+    this.resetGrabDisplacement();
+    this.arcMeshes.forEach((arc) => arc.scale.set(0.001, 0.001, 0.001));
+    this.arcMaterials.forEach((mat) => (mat.opacity = 0));
+    this.grabOrbMesh.scale.set(0.001, 0.001, 0.001);
+    this.grabOrbMaterial.opacity = 0;
   }
 
   dispose(): void {

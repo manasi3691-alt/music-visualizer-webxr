@@ -30,15 +30,15 @@ import {
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
 export interface FlowerTimelineConfig {
-  t_spawn: number;            // 6.0s (appears in distance)
-  t_arrival: number;          // 12.0s (arrives at user focal point)
-  t_touch_window_end: number; // 24.0s (12s after arrival fallback timeout)
+  t_spawn: number;            // 58.0s (appears during aurora transition)
+  t_arrival: number;          // 65.0s (arrives at focal point for Phase 2)
+  t_touch_window_end: number; // 165.0s (stays active across all of Phase 2)
 }
 
 export const FLOWER_TIMELINE: FlowerTimelineConfig = {
-  t_spawn: 6.0,
-  t_arrival: 12.0,
-  t_touch_window_end: 24.0,
+  t_spawn: 58.0,
+  t_arrival: 65.0,
+  t_touch_window_end: 165.0,
 };
 
 export class GlowingFlower {
@@ -49,11 +49,14 @@ export class GlowingFlower {
   private isSpawned = false;
   private isTouched = false;
   private touchCooldownRemaining = 0;
+  private touchGlow = 0;
+  private swayAngle = 0;
   private isDebugMode = false;
 
   // Visual meshes
-  private flowerRoot: Group = new Group();
+  readonly flowerRoot: Group = new Group();
   private petals: Mesh[] = [];
+  private petalBaseTilts: number[] = [];
   private petalMaterials: ShaderMaterial[] = [];
   private debugMaterials: MeshNormalMaterial[] = [];
   private centerCore: Mesh;
@@ -265,6 +268,8 @@ export class GlowingFlower {
         const petalMat = new ShaderMaterial({
           uniforms: {
             uTime: { value: 0 },
+            uTouchGlow: { value: 0.0 },
+            uHigh: { value: 0.0 },
             uBaseColor: { value: new Color(0x1ca3c4) },      // Delicate turquoise
             uEdgeColor: { value: new Color(0x6ee7b7) },      // Mint/cyan luminous edge
             uHighlightColor: { value: new Color(0xf472b6) }, // Soft blossom pink/magenta tip
@@ -282,6 +287,8 @@ export class GlowingFlower {
           `,
           fragmentShader: `
             uniform float uTime;
+            uniform float uTouchGlow;
+            uniform float uHigh;
             uniform vec3 uBaseColor;
             uniform vec3 uEdgeColor;
             uniform vec3 uHighlightColor;
@@ -294,17 +301,23 @@ export class GlowingFlower {
               float tip = vUv.y;
               float edge = abs(vUv.x - 0.5) * 2.0;
 
-              // Soft luminous vein texture
-              float vein = sin(vUv.x * 16.0 + vUv.y * 8.0 + uTime * 1.2) * 0.5 + 0.5;
+              // Detailed crystalline branched veins dynamically illuminated by high frequencies and touch
+              float vein1 = sin(vUv.x * 24.0 + vUv.y * 12.0 + uTime * 1.5) * 0.5 + 0.5;
+              float vein2 = cos(vUv.x * 14.0 - vUv.y * 22.0 + uTime * 0.9) * 0.5 + 0.5;
+              float crystalVeins = pow(vein1 * vein2, 1.6) * 2.2;
+              float veinPower = 0.20 + uHigh * 0.55 + uTouchGlow * 0.60;
 
               vec3 col = mix(uBaseColor, uEdgeColor, edge * 0.65);
               // Pink/magenta flush toward upper petal edges and tip
               col = mix(col, uHighlightColor, pow(tip, 1.6) * 0.75);
-              col += vec3(0.7, 0.95, 1.0) * pow(vein, 4.0) * 0.16;
+              col += vec3(0.75, 0.95, 1.0) * crystalVeins * veinPower;
+
+              // Touch glow radiance boost
+              col += vec3(0.3, 0.8, 1.0) * uTouchGlow * 0.65;
 
               // Subtle non-overblown Fresnel rim
               float fresnel = 1.0 - max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
-              col += uEdgeColor * pow(fresnel, 2.2) * 0.35;
+              col += uEdgeColor * pow(fresnel, 2.2) * (0.35 + uTouchGlow * 0.4);
 
               gl_FragColor = vec4(col, uOpacity * (0.80 + 0.20 * tip));
             }
@@ -329,6 +342,7 @@ export class GlowingFlower {
         petalMesh.rotation.x = tier.tilt;
 
         this.petals.push(petalMesh);
+        this.petalBaseTilts.push(tier.tilt);
         this.petalMaterials.push(petalMat);
         this.flowerRoot.add(petalMesh);
       }
@@ -380,13 +394,15 @@ export class GlowingFlower {
   }
 
   /**
-   * Trigger touch response (once). Called either by user interaction or 12s fallback timeout.
+   * Trigger touch response. Can be re-triggered throughout Phase 2.
    */
   triggerTouch(): boolean {
-    if (this.isTouched || this.touchCooldownRemaining > 0) return false;
+    if (this.touchCooldownRemaining > 0) return false;
     this.isTouched = true;
-    this.touchCooldownRemaining = 0.30; // 300ms debounce
-    console.log('[GlowingFlower] Touch reaction triggered!');
+    this.touchGlow = 1.0;
+    this.swayAngle = 0.22;
+    this.touchCooldownRemaining = 0.25; // 250ms debounce for responsive repeated touches
+    console.log('[GlowingFlower] Lotus petal touch reaction triggered — glowing veins & gentle sway!');
     return true;
   }
 
@@ -401,8 +417,14 @@ export class GlowingFlower {
     if (this.touchCooldownRemaining > 0) {
       this.touchCooldownRemaining -= deltaSec;
     }
+    if (this.touchGlow > 0) {
+      this.touchGlow = Math.max(0, this.touchGlow - deltaSec * 1.4);
+    }
+    if (Math.abs(this.swayAngle) > 0.001) {
+      this.swayAngle *= Math.pow(0.08, deltaSec);
+    }
 
-    // 1. Spawning / Approach phase
+    // 1. Spawning / Approach phase (58s -> 65s)
     if (relativeTime >= FLOWER_TIMELINE.t_spawn && relativeTime < FLOWER_TIMELINE.t_arrival) {
       if (!this.isSpawned) {
         this.isSpawned = true;
@@ -432,7 +454,7 @@ export class GlowingFlower {
       // Trail update
       this.updateTrail(this.scratchCurrentPos, easeT);
     }
-    // 2. Waiting for Touch / Interactive window
+    // 2. Active Interactive Phase 2 Window (65s -> 165s)
     else if (relativeTime >= FLOWER_TIMELINE.t_arrival && relativeTime <= FLOWER_TIMELINE.t_touch_window_end) {
       this.group.visible = true;
       this.flowerRoot.position.copy(this.targetFocalPos);
@@ -441,46 +463,58 @@ export class GlowingFlower {
       const hoverOffset = Math.sin(relativeTime * 1.8) * 0.015;
       this.flowerRoot.position.y = this.targetFocalPos.y + hoverOffset;
 
-      // Gentle rotation
+      // Gentle rotation plus touch sway
+      const sway = Math.sin(relativeTime * 8.0) * this.swayAngle;
       this.flowerRoot.rotation.y += deltaSec * 0.25;
-
-      // Fallback timer auto-trigger
-      if (relativeTime >= FLOWER_TIMELINE.t_touch_window_end - 0.05 && !this.isTouched) {
-        this.triggerTouch();
-      }
+      this.flowerRoot.rotation.z = sway;
 
       // Trail fades out once arrived
       this.trailPoints.visible = false;
     }
-    // 3. Post-touch window / dissolution into ocean
-    else if (relativeTime > FLOWER_TIMELINE.t_touch_window_end) {
-      if (this.isTouched && this.reactionProgress < 1.0) {
-        this.reactionProgress = Math.min(1.0, this.reactionProgress + deltaSec * 0.6);
-        // Expand and softly dissolve as ocean emerges
-        const scale = 1.0 + this.reactionProgress * 1.2;
-        const alpha = Math.max(0, 1.0 - this.reactionProgress);
-        this.flowerRoot.scale.set(scale, scale, scale);
-        for (let i = 0; i < this.petalMaterials.length; i++) {
-          this.petalMaterials[i].uniforms.uOpacity.value = alpha * 0.88;
-        }
-        if (alpha <= 0.01) {
-          this.group.visible = false;
-        }
+    // 3. Cosmic Ascent Transition: Dissolving gracefully into star streams (165s -> 175s)
+    else if (relativeTime > FLOWER_TIMELINE.t_touch_window_end && relativeTime < 175.0) {
+      this.group.visible = true;
+      const dissolveProgress = Math.max(0, Math.min(1, (relativeTime - FLOWER_TIMELINE.t_touch_window_end) / 10.0));
+      // Smoothstep easing for petal expansion and stardust dispersal
+      const ease = dissolveProgress * dissolveProgress * (3.0 - 2.0 * dissolveProgress);
+      const scale = 1.0 + ease * 1.2;
+      const alpha = Math.max(0, 1.0 - ease);
+      this.flowerRoot.scale.set(scale, scale, scale);
+      for (let i = 0; i < this.petalMaterials.length; i++) {
+        this.petalMaterials[i].uniforms.uOpacity.value = alpha * 0.88;
+      }
+      if (alpha <= 0.01) {
+        this.group.visible = false;
       }
     } else {
       this.group.visible = false;
     }
 
-    // Gentle FFT breathing modulation on petals
+    // Gentle FFT breathing modulation on petals + unfolding bloom angle
     const energy = metrics ? metrics.overall : 0;
-    const breathe = 1.0 + Math.sin(relativeTime * 2.2) * 0.02 + energy * 0.04;
-    for (let i = 0; i < this.petals.length; i++) {
-      this.petals[i].scale.set(breathe, breathe, breathe);
+    const mid = metrics ? metrics.mid : 0;
+    const high = metrics ? metrics.high : 0;
+    const breathe = 1.0 + Math.sin(relativeTime * 2.2) * 0.02 + energy * 0.04 + this.touchGlow * 0.06;
+
+    // Transition 1 unfolding bloom progress (58.0s -> 65.0s)
+    let bloomProgress = 1.0;
+    if (relativeTime < FLOWER_TIMELINE.t_arrival) {
+      const bT = Math.max(0, Math.min(1, (relativeTime - FLOWER_TIMELINE.t_spawn) / (FLOWER_TIMELINE.t_arrival - FLOWER_TIMELINE.t_spawn)));
+      bloomProgress = 0.12 + Math.pow(bT, 2.0) * 0.88;
     }
 
-    // Update material time uniform
+    for (let i = 0; i < this.petals.length; i++) {
+      this.petals[i].scale.set(breathe, breathe, breathe);
+      // Unfold petals from closed bud to full bloom, plus subtle mid-frequency breathing
+      const baseTilt = this.petalBaseTilts[i] ?? 0.4;
+      this.petals[i].rotation.x = baseTilt * bloomProgress * (1.0 + mid * 0.06);
+    }
+
+    // Update material time, high frequency vein boost, and touch radiance
     for (let i = 0; i < this.petalMaterials.length; i++) {
       this.petalMaterials[i].uniforms.uTime.value = relativeTime;
+      this.petalMaterials[i].uniforms.uTouchGlow.value = this.touchGlow;
+      this.petalMaterials[i].uniforms.uHigh.value = high;
     }
   }
 
@@ -507,6 +541,8 @@ export class GlowingFlower {
     this.isSpawned = false;
     this.isTouched = false;
     this.touchCooldownRemaining = 0;
+    this.touchGlow = 0;
+    this.swayAngle = 0;
     this.reactionProgress = 0;
     this.group.visible = false;
     this.flowerRoot.scale.set(0.001, 0.001, 0.001);

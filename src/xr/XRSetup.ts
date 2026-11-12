@@ -27,12 +27,10 @@ export class XRSetup {
       experienceState.setXRState('ENDED');
     });
 
-    xrState.checkSupport().then((supported) => {
-      console.log(`[XRSetup] WebXR immersive-vr supported: ${supported}`);
-    });
+    console.log(`[XRSetup] WebXR immersive-vr supported: ${xrState.isSupported}`);
   }
 
-  async launchXR(): Promise<void> {
+  launchXR(): void {
     if (!this.world) return;
     if (this.world.session) {
       console.log('[XRSetup] Session already active');
@@ -43,6 +41,13 @@ export class XRSetup {
     try {
       experienceState.setXRState('REQUESTING');
       this.world.launchXR();
+
+      setTimeout(() => {
+        if (experienceState.xrState === 'REQUESTING' && !this.world?.session) {
+          console.warn('[XRSetup] Session request timed out or was dismissed');
+          experienceState.setXRState('NONE');
+        }
+      }, 5000);
     } catch (err) {
       console.error('[XRSetup] Launch XR failed:', err);
       experienceState.setXRState('ENDED');

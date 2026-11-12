@@ -30,6 +30,7 @@ import {
   Camera,
   World,
 } from '@iwsdk/core';
+import { AudioMetrics } from '../audio/AudioAnalyzer.js';
 
 export interface ShootingStarTimelineConfig {
   t0_spawn: number;      // Seconds in relative time: star spawns & travels (28.5s)
@@ -41,12 +42,12 @@ export interface ShootingStarTimelineConfig {
 }
 
 export const CINEMATIC_TIMELINE: ShootingStarTimelineConfig = {
-  t0_spawn: 28.5,
-  t1_impact: 31.0,
-  t2_burst: 31.0,
-  t3_dissolve: 24.0, // City begins dissolving to ocean at flower touch
-  t4_universe: 34.0, // Fully dissolved before/during universe reveal
-  t5_settle: 36.5,
+  t0_spawn: 161.0,     // Ocean light trails ascend at 161.0s
+  t1_impact: 165.0,    // Climax impact at 165.0s (massive musical drop)
+  t2_burst: 165.0,     // Burst of radiant celestial sparkles
+  t3_dissolve: 55.0,   // City begins dissolving to aurora particles at 55.0s
+  t4_universe: 175.0,  // Deep cosmos & Solar System fully revealed at 175.0s
+  t5_settle: 178.0,    // Sparkle burst settles into background cosmos
 };
 
 export class ShootingStarUniverse {
@@ -390,7 +391,7 @@ export class ShootingStarUniverse {
    * Main cinematic update driven by audio time.
    * Uses relativeTime [0.0 - 38.0s].
    */
-  update(deltaSec: number, relativeTime: number, world?: World, camera?: Camera): void {
+  update(deltaSec: number, relativeTime: number, metrics?: AudioMetrics, world?: World, camera?: Camera): void {
     // Check trigger condition
     if (relativeTime >= CINEMATIC_TIMELINE.t0_spawn && !this.hasTriggeredThisCycle) {
       this.trigger(relativeTime, world, camera);
@@ -484,27 +485,7 @@ export class ShootingStarUniverse {
       this.burstGroup.visible = false;
     }
 
-    // --- PHASE 3: CITY DISSOLVE (t3 -> t4) ---
-    if (relativeTime >= CINEMATIC_TIMELINE.t3_dissolve && this.cityGroupRef) {
-      const dissolveDuration = CINEMATIC_TIMELINE.t4_universe - CINEMATIC_TIMELINE.t3_dissolve;
-      const dissolveT = Math.max(0, Math.min(1, (relativeTime - CINEMATIC_TIMELINE.t3_dissolve) / dissolveDuration));
-
-      // Ease city scale down to zero gracefully as if dissolving into stardust
-      const scaleFactor = Math.max(0, 1.0 - dissolveT);
-      this.cityGroupRef.scale.set(
-        this.originalCityScale.x * scaleFactor,
-        this.originalCityScale.y * scaleFactor,
-        this.originalCityScale.z * scaleFactor
-      );
-
-      // When fully dissolved, hide city group to completely save draw calls on Quest
-      if (dissolveT >= 0.99) {
-        this.cityGroupRef.visible = false;
-        this.isCityDissolved = true;
-      }
-    }
-
-    // --- PHASE 4: UNIVERSE REVEAL (t2 -> t4 and onward) ---
+    // --- PHASE 3: UNIVERSE REVEAL (t2 -> t4 and onward) ---
     if (relativeTime >= CINEMATIC_TIMELINE.t2_burst) {
       this.universeGroup.visible = true;
       const revealDuration = CINEMATIC_TIMELINE.t4_universe - CINEMATIC_TIMELINE.t2_burst;
@@ -513,17 +494,20 @@ export class ShootingStarUniverse {
       // Smoothstep fade for universe
       this.universeAlpha = revealT * revealT * (3 - 2 * revealT);
 
+      const high = metrics?.high ?? 0;
+      const energy = metrics?.energy ?? 0;
+
       if (this.universeStars) {
-        (this.universeStars.material as PointsMaterial).opacity = this.universeAlpha * 0.95;
+        (this.universeStars.material as PointsMaterial).opacity = this.universeAlpha * (0.80 + high * 0.20 + energy * 0.15);
       }
 
       for (let i = 0; i < this.nebulaPlanes.length; i++) {
-        (this.nebulaPlanes[i].material as MeshBasicMaterial).opacity = this.universeAlpha * 0.35;
+        (this.nebulaPlanes[i].material as MeshBasicMaterial).opacity = this.universeAlpha * (0.28 + energy * 0.22);
       }
 
       // Gentle continuous cosmic drift
       if (this.universeStars) {
-        this.universeStars.rotation.y += deltaSec * 0.008;
+        this.universeStars.rotation.y += deltaSec * (0.008 + energy * 0.012);
       }
     }
   }
