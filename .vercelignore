@@ -1,6 +1,6 @@
 cloudflared.exe
 .git
-Audio /
+Audio/
 dist
 node_modules
 .agents
