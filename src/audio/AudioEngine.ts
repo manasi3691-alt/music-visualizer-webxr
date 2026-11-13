@@ -5,7 +5,7 @@
 
 import { EXPERIENCE_CONFIG } from '../app/ExperienceConfig.js';
 import { experienceState } from '../app/ExperienceState.js';
-import { audioAnalyzer } from './AudioAnalyzer.js';
+import { audioAnalyzer } from './AudioAnalyzer';
 import { musicExcerpt } from './MusicExcerpt.js';
 
 export class AudioEngine {

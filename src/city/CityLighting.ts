@@ -6,7 +6,7 @@
 
 import { Group, DirectionalLight, PointLight, Color } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export class CityLighting {
   readonly group: Group = new Group();

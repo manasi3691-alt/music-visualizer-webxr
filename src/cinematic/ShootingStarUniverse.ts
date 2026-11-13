@@ -31,7 +31,7 @@ import {
   Camera,
   World,
 } from '@iwsdk/core';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export interface ShootingStarTimelineConfig {
   t0_spawn: number;      // Seconds in relative time: star spawns & travels (28.5s)

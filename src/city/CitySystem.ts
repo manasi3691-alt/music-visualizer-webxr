@@ -13,7 +13,7 @@ import { ConstructionZone } from './CityConstruction.js';
 import { CityInteraction } from './CityInteraction.js';
 import { CityLighting } from './CityLighting.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 import { CinematicEventType } from '../conductor/CueSheet.js';
 
 export class CitySystem {

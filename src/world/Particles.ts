@@ -13,7 +13,7 @@ import {
   AdditiveBlending,
 } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 import { EXPERIENCE_CONFIG } from '../app/ExperienceConfig.js';
 
 export class Particles {

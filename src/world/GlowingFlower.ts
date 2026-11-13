@@ -34,7 +34,7 @@ import {
   Camera,
   World,
 } from '@iwsdk/core';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export interface FlowerTimelineConfig {
   t_spawn: number;            // 58.0s (swoops in during aurora transition)

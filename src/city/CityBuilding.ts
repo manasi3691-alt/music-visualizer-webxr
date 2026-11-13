@@ -24,7 +24,7 @@ import {
 } from '@iwsdk/core';
 import { BuildingType, CITY_PALETTE, CONSTRUCTION_ANIMATION_DURATION } from './CityConfig.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export interface CityBuildingOptions {
   id: string;

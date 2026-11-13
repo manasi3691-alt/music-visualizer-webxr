@@ -32,7 +32,7 @@ import {
   FrontSide,
 } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 interface ReachableBubble {
   mesh: Mesh;

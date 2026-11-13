@@ -22,7 +22,7 @@ import {
   Vector3,
 } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 interface ArchBuilding {
   mesh: Mesh;

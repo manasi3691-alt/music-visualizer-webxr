@@ -25,7 +25,7 @@ import {
   AdditiveBlending,
   DoubleSide,
 } from '@iwsdk/core';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 interface RibbonPathConfig {
   name: string;

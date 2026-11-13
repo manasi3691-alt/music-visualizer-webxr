@@ -24,7 +24,7 @@ import {
   Vector3,
   AdditiveBlending,
 } from '@iwsdk/core';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export interface FireworkFlash {
   position: Vector3;

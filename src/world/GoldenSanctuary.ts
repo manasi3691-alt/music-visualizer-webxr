@@ -7,7 +7,7 @@
  */
 import { Group, Mesh, MeshStandardMaterial, CylinderGeometry, Color, Vector3 } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export class GoldenSanctuary {
   readonly group: Group = new Group();

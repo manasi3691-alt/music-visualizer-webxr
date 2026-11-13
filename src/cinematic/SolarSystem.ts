@@ -34,7 +34,7 @@ import {
   AdditiveBlending,
   MathUtils,
 } from '@iwsdk/core';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export type PlanetOwnership = 'Orbital' | 'UserOwned' | 'Released';
 

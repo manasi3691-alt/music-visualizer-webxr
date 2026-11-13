@@ -1,0 +1,26 @@
+warning: in the working copy of 'src/world/ExperienceWorld.ts', LF will be replaced by CRLF the next time Git touches it
+ package-lock.json                     |  45 [32m++[m[31m--[m
+ src/app/ExperienceApp.ts              |   4 [32m+[m[31m-[m
+ src/audio/AudioEngine.ts              |   2 [32m+[m[31m-[m
+ src/cinematic/ShootingStarUniverse.ts |   2 [32m+[m[31m-[m
+ src/cinematic/SolarSystem.ts          |   2 [32m+[m[31m-[m
+ src/city/CityBuilding.ts              |   2 [32m+[m[31m-[m
+ src/city/CityDistrict.ts              |   2 [32m+[m[31m-[m
+ src/city/CityLighting.ts              |   2 [32m+[m[31m-[m
+ src/city/CitySystem.ts                |   2 [32m+[m[31m-[m
+ src/conductor/MusicalConductor.ts     |   2 [32m+[m[31m-[m
+ src/world/Atmosphere.ts               |   2 [32m+[m[31m-[m
+ src/world/CosmicFireworks.ts          |   2 [32m+[m[31m-[m
+ src/world/ExperienceWorld.ts          |  49 [32m++[m[31m---[m
+ src/world/GlowingFlower.ts            |   2 [32m+[m[31m-[m
+ src/world/GoldenSanctuary.ts          |   2 [32m+[m[31m-[m
+ src/world/ImmersiveArchitecture.ts    |   2 [32m+[m[31m-[m
+ src/world/LightTrails.ts              |   2 [32m+[m[31m-[m
+ src/world/LightingSystem.ts           |   2 [32m+[m[31m-[m
+ src/world/OceanOfLight.ts             | 386 [32m++++[m[31m------------------------------[m
+ src/world/OrganicForms.ts             |   2 [32m+[m[31m-[m
+ src/world/Particles.ts                |   2 [32m+[m[31m-[m
+ src/world/SoundBubbles.ts             |   2 [32m+[m[31m-[m
+ src/world/Structures.ts               |   2 [32m+[m[31m-[m
+ src/world/Waves.ts                    |   2 [32m+[m[31m-[m
+ 24 files changed, 103 insertions(+), 421 deletions(-)

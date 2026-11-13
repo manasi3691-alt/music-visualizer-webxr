@@ -16,7 +16,7 @@ import {
   DoubleSide,
 } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export type VisualLifeState =
   | 'HIDDEN'

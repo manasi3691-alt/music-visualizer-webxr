@@ -5,8 +5,8 @@
 
 import { World, Entity } from '@iwsdk/core';
 import { EXPERIENCE_CONFIG } from './ExperienceConfig.js';
-import { audioEngine } from '../audio/AudioEngine.js';
-import { audioAnalyzer } from '../audio/AudioAnalyzer.js';
+import { audioEngine } from '../audio/AudioEngine';
+import { audioAnalyzer } from '../audio/AudioAnalyzer';
 import { musicalConductor } from '../conductor/MusicalConductor.js';
 import { ExperienceWorld } from '../world/ExperienceWorld.js';
 import { experienceState, ExperiencePhase } from './ExperienceState.js';

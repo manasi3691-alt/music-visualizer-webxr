@@ -6,7 +6,7 @@
 
 import { AmbientLight, DirectionalLight, Group, Color } from '@iwsdk/core';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export class LightingSystem {
   readonly group: Group = new Group();

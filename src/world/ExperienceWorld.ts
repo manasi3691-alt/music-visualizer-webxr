@@ -16,7 +16,7 @@ import { ImmersiveArchitecture } from './ImmersiveArchitecture.js';
 import { GoldenSanctuary } from './GoldenSanctuary.js';
 import { SoundBubbles } from './SoundBubbles.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 import { ShootingStarUniverse } from '../cinematic/ShootingStarUniverse.js';
 import { SolarSystem } from '../cinematic/SolarSystem.js';
@@ -25,10 +25,12 @@ import { OceanOfLight } from './OceanOfLight.js';
 import { CosmicFireworks } from './CosmicFireworks.js';
 import { LightTrails } from './LightTrails.js';
 import { Camera, World } from '@iwsdk/core';
+import { FinalCinematic } from './FinalCinematic.js';
 
 export class ExperienceWorld {
   readonly rootGroup: Group = new Group();
 
+  // Core subsystems
   readonly atmosphere: Atmosphere;
   readonly organicForms: OrganicForms;
   readonly structures: Structures;
@@ -45,6 +47,9 @@ export class ExperienceWorld {
   readonly immersiveArchitecture: ImmersiveArchitecture;
   readonly goldenSanctuary: GoldenSanctuary;
   readonly soundBubbles: SoundBubbles;
+
+  // Final cinematic controller (official ending)
+  private finalCinematic: FinalCinematic;
 
   private waveOrigin = new Vector3(0, 1.1, -1.0);
   private scratchHandPos = new Vector3();
@@ -68,6 +73,9 @@ export class ExperienceWorld {
     this.goldenSanctuary = new GoldenSanctuary(isQuest);
     this.soundBubbles = new SoundBubbles(isQuest);
 
+    // Final cinematic controller
+    this.finalCinematic = new FinalCinematic();
+
     // Assemble single persistent scene graph
     this.rootGroup.add(this.atmosphere.group);
     this.rootGroup.add(this.lighting.group);
@@ -85,17 +93,15 @@ export class ExperienceWorld {
     this.rootGroup.add(this.immersiveArchitecture.group);
     this.rootGroup.add(this.goldenSanctuary.group);
     this.rootGroup.add(this.soundBubbles.group);
+    this.rootGroup.add(this.finalCinematic.group);
   }
 
-  /**
-   * Called when user touches/pokes an element
-   */
+  /** Called when user touches/pokes an element */
   handleTouch(targetPos?: Vector3): void {
     this.organicForms.triggerTouchRipple();
     const pos = targetPos || this.waveOrigin;
     this.waves.emitWave(pos, 3.8, 3.0);
 
-    // If touching specifically near the crystal lotus flower, trigger petal reaction
     if (this.glowingFlower.group.visible && targetPos) {
       const flowerPos = this.glowingFlower.flowerRoot.position;
       if (targetPos.distanceTo(flowerPos) < 0.14) {
@@ -103,15 +109,12 @@ export class ExperienceWorld {
       }
     }
 
-    // If reaching into the cosmic water (y <= 0.45m), emit expanding luminous cyan/teal ripple
     if (pos.y <= 0.45 && this.oceanOfLight.group.visible) {
       this.waves.emitWave(new Vector3(pos.x, 0.08, pos.z), 4.8, 2.4, [0.15, 0.85, 0.95]);
     }
   }
 
-  /**
-   * Called when user grabs/drags an element
-   */
+  /** Called when user grabs/drags an element */
   handleGrab(dx: number, dy: number, dz: number): void {
     this.structures.setGrabDisplacement(dx, dy, dz);
     if (this.citySystem.interaction.isGrabbing()) {
@@ -119,9 +122,7 @@ export class ExperienceWorld {
     }
   }
 
-  /**
-   * Called when grab is released
-   */
+  /** Called when grab is released */
   handleGrabRelease(): void {
     this.structures.resetGrabDisplacement();
     if (this.citySystem.interaction.isGrabbing()) {
@@ -130,9 +131,7 @@ export class ExperienceWorld {
     this.waves.emitWave(this.structures.grabOrbMesh.position, 4.0, 2.5);
   }
 
-  /**
-   * Wire XR world into SoundBubbles and GlowingFlower for proximity detection
-   */
+  /** Wire XR world into SoundBubbles and GlowingFlower for proximity detection */
   onXRSessionStart(world: World): void {
     this.soundBubbles.setXRWorld(world);
     this.glowingFlower.setXRWorld(world);
@@ -148,33 +147,24 @@ export class ExperienceWorld {
     this.glowingFlower.clearXRWorld();
   }
 
-  /**
-   * Update visual systems in strict order (Section 41)
-   */
+  /** Update visual systems in strict order */
   update(frameData: ConductorFrameData, metrics: AudioMetrics, deltaSec: number, world?: World, camera?: Camera): void {
-    // 1. Environmental lighting & atmosphere
     this.lighting.update(frameData, metrics);
     this.atmosphere.update(frameData, metrics);
 
-    // 2. City procedural evolution (music-driven)
     this.citySystem.update(frameData, metrics, deltaSec);
 
-    // 3. Dense immersive architecture (music-synchronized)
     this.immersiveArchitecture.update(frameData, metrics, deltaSec);
     this.goldenSanctuary.update(frameData, metrics, deltaSec);
 
-    // 3.5 Flower approach and touch interaction
     this.glowingFlower.update(deltaSec, frameData.relativeTime, metrics, world, camera);
 
-    // 3.6 Phase 2: 360° Cosmic Fireworks and Luminous Light Trails
     this.cosmicFireworks.update(deltaSec, frameData.relativeTime, metrics);
     this.lightTrails.update(deltaSec, frameData.relativeTime, metrics);
 
-    // 3.7 Living Ocean of Light with dynamic firework & trail reflections
     const fireworkFlashes = this.cosmicFireworks.getActiveFlashes();
     this.oceanOfLight.update(deltaSec, frameData.relativeTime, metrics, fireworkFlashes);
 
-    // 3.7 WebXR controller proximity interactions (ocean surface reach)
     if (world?.renderer?.xr?.isPresenting) {
       for (let i = 0; i < 2; i++) {
         const controller = world.renderer.xr.getController(i);
@@ -189,22 +179,19 @@ export class ExperienceWorld {
       }
     }
 
-    // 4. Primary & secondary geometry
     this.organicForms.update(frameData, metrics, deltaSec);
     this.structures.update(frameData, metrics, deltaSec);
 
-    // 5. Dynamic effects: particles & waves
     this.particles.update(frameData, metrics, deltaSec);
     this.waves.update(frameData, metrics, deltaSec);
 
-    // 6. Sound bubbles (reachable pearlescent droplets + VR interaction)
     this.soundBubbles.update(frameData, metrics, deltaSec, world);
 
-    // 7. Climax event: Shooting star & Universe transition
     this.shootingStarUniverse.update(deltaSec, frameData.relativeTime, metrics, world, camera);
-
-    // 8. Interactive 3D Solar System (reveals after universe transition)
     this.solarSystem.update(deltaSec, frameData.relativeTime, metrics, world, camera);
+
+    // Final cinematic ending sequence
+    this.finalCinematic.update(deltaSec);
   }
 
   reset(): void {

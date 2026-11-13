@@ -3,7 +3,7 @@
  * Driven strictly by audio.currentTime.
  */
 
-import { audioEngine } from '../audio/AudioEngine.js';
+import { audioEngine } from '../audio/AudioEngine';
 import { musicExcerpt } from '../audio/MusicExcerpt.js';
 import { CUE_SHEET, CinematicCue, CinematicEventType } from './CueSheet.js';
 import { cueExecutor } from './CueExecutor.js';

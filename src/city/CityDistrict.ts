@@ -24,7 +24,7 @@ import { CityBuilding } from './CityBuilding.js';
 import { CityBlock } from './CityBlock.js';
 import { CITY_ZONES, CITY_PALETTE, CityZoneName } from './CityConfig.js';
 import { ConductorFrameData } from '../conductor/MusicalConductor.js';
-import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+import { AudioMetrics } from '../audio/AudioAnalyzer';
 
 export interface DistrictConfig {
   id: string;
