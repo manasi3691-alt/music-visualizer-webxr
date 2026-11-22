@@ -88,7 +88,7 @@ export const CUE_SHEET: CinematicCue[] = [
     absoluteTime: 175.0,
     event: 'CLIMAX',
     duration: 75.0,
-    description: 'Phase 3: Interactive Solar System emerges in deep cosmos with full hand grabbing and orbital interaction.',
+    description: 'Phase 3: Interactive Solar System & The Infinite Bloom — meteor storm transforms into an interactive lotus ocean.',
   },
   {
     id: 'cue-release',

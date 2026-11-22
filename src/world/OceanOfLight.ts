@@ -539,14 +539,10 @@ export class OceanOfLight {
     } else if (relativeTime > OCEAN_TIMELINE.t_dissolve_end && relativeTime < OCEAN_TIMELINE.t_star_fire) {
       this.oceanAlpha = 1.0;
     }
-    // Ocean currents stretch upward into sky trails and dissolve into cosmic stars at 165.0s - 175.0s
+    // Cosmic ocean settles into serene reflective water for Phase 3 Infinite Bloom & Solar System (165.0s -> 266.92s)
     else if (relativeTime >= OCEAN_TIMELINE.t_star_fire) {
       const prog = Math.min(1.0, (relativeTime - OCEAN_TIMELINE.t_star_fire) / (OCEAN_TIMELINE.t_universe - OCEAN_TIMELINE.t_star_fire));
-      this.oceanAlpha = Math.max(0, 1.0 - prog);
-      if (this.oceanAlpha <= 0.01) {
-        this.group.visible = false;
-        return;
-      }
+      this.oceanAlpha = 1.0 - prog * 0.15; // Smoothly settles from 1.0 to 0.85
     }
 
     const bass = metrics?.low ?? 0;
@@ -618,7 +614,7 @@ export class OceanOfLight {
       mat.uniforms.uTime.value = relativeTime;
     }
 
-    (this.floatingLotuses.material as ShaderMaterial).uniforms.uAlpha.value = this.oceanAlpha;
+    (this.floatingLotuses.material as ShaderMaterial).uniforms.uAlpha.value = relativeTime >= 165.0 ? 0.0 : this.oceanAlpha;
 
     for (let i = 0; i < this.lightCurtains.length; i++) {
       const mat = this.lightCurtains[i].material as ShaderMaterial;

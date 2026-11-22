@@ -24,6 +24,7 @@ import { GlowingFlower } from './GlowingFlower.js';
 import { OceanOfLight } from './OceanOfLight.js';
 import { CosmicFireworks } from './CosmicFireworks.js';
 import { LightTrails } from './LightTrails.js';
+import { InfiniteBloomLotusField } from './InfiniteBloomLotusField.js';
 import { Camera, World } from '@iwsdk/core';
 
 export class ExperienceWorld {
@@ -45,6 +46,7 @@ export class ExperienceWorld {
   readonly immersiveArchitecture: ImmersiveArchitecture;
   readonly goldenSanctuary: GoldenSanctuary;
   readonly soundBubbles: SoundBubbles;
+  readonly infiniteBloomField: InfiniteBloomLotusField;
 
   private waveOrigin = new Vector3(0, 1.1, -1.0);
   private scratchHandPos = new Vector3();
@@ -67,6 +69,7 @@ export class ExperienceWorld {
     this.immersiveArchitecture = new ImmersiveArchitecture(isQuest);
     this.goldenSanctuary = new GoldenSanctuary(isQuest);
     this.soundBubbles = new SoundBubbles(isQuest);
+    this.infiniteBloomField = new InfiniteBloomLotusField(isQuest);
 
     // Assemble single persistent scene graph
     this.rootGroup.add(this.atmosphere.group);
@@ -85,6 +88,7 @@ export class ExperienceWorld {
     this.rootGroup.add(this.immersiveArchitecture.group);
     this.rootGroup.add(this.goldenSanctuary.group);
     this.rootGroup.add(this.soundBubbles.group);
+    this.rootGroup.add(this.infiniteBloomField.group);
   }
 
   /**
@@ -101,6 +105,11 @@ export class ExperienceWorld {
       if (targetPos.distanceTo(flowerPos) < 0.14) {
         this.glowingFlower.triggerTouch();
       }
+    }
+
+    // If touching near any infinite bloom lotus flower in Phase 3
+    if (this.infiniteBloomField.group.visible && targetPos) {
+      this.infiniteBloomField.hitTest(targetPos, new Vector3(0, -1, 0));
     }
 
     // If reaching into the cosmic water (y <= 0.45m), emit expanding luminous cyan/teal ripple
@@ -136,16 +145,19 @@ export class ExperienceWorld {
   onXRSessionStart(world: World): void {
     this.soundBubbles.setXRWorld(world);
     this.glowingFlower.setXRWorld(world);
+    this.infiniteBloomField.setXRWorld(world);
     const session = (world.renderer as any)?.xr?.getSession() || (world as any).session;
     if (session) {
       this.soundBubbles.bindXRSession(session);
       this.glowingFlower.bindXRSession(session);
+      this.infiniteBloomField.bindXRSession(session);
     }
   }
 
   onXRSessionEnd(): void {
     this.soundBubbles.clearXRWorld();
     this.glowingFlower.clearXRWorld();
+    this.infiniteBloomField.clearXRWorld();
   }
 
   /**
@@ -205,6 +217,9 @@ export class ExperienceWorld {
 
     // 8. Interactive 3D Solar System (reveals after universe transition)
     this.solarSystem.update(deltaSec, frameData.relativeTime, metrics, world, camera);
+
+    // 9. Phase 3 Finale: A Sky Full of Stars: The Infinite Bloom
+    this.infiniteBloomField.update(deltaSec, frameData.relativeTime, metrics, world, camera);
   }
 
   reset(): void {
@@ -220,6 +235,7 @@ export class ExperienceWorld {
     this.immersiveArchitecture.reset();
     this.goldenSanctuary.reset();
     this.soundBubbles.reset();
+    this.infiniteBloomField.reset();
   }
 
   dispose(): void {
@@ -239,6 +255,7 @@ export class ExperienceWorld {
     this.immersiveArchitecture.dispose();
     this.goldenSanctuary.dispose();
     this.soundBubbles.dispose();
+    this.infiniteBloomField.dispose();
     this.rootGroup.clear();
   }
 }

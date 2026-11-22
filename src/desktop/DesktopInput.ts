@@ -128,6 +128,16 @@ export class DesktopInput {
       }
     }
 
+    // Check if user clicked any flower in the Infinite Bloom Lotus Field (Phase 3)
+    if (experienceWorld?.infiniteBloomField?.group.visible) {
+      this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const hitFlower = experienceWorld.infiniteBloomField.hitTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
+      if (hitFlower) {
+        experienceWorld.handleTouch(hitFlower.worldPos);
+        return;
+      }
+    }
+
     // Trigger touch ripple on forward click
     if (interactionRegistry.isTouchAvailable()) {
       interactionRegistry.onTouch('primary-ribbon');
@@ -169,6 +179,12 @@ export class DesktopInput {
       if (experienceWorld?.glowingFlower?.group.visible) {
         this.raycaster.setFromCamera(this.mouseVec, this.camera);
         experienceWorld.glowingFlower.hoverTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
+      }
+
+      // Hover test for Infinite Bloom lotus flowers (Phase 3)
+      if (experienceWorld?.infiniteBloomField?.group.visible) {
+        this.raycaster.setFromCamera(this.mouseVec, this.camera);
+        experienceWorld.infiniteBloomField.hoverTest(this.raycaster.ray.origin, this.raycaster.ray.direction);
       }
       return;
     }
