@@ -4,35 +4,36 @@
  * Requirements:
  * 1. THE METEOR STORM:
  *    - Perseid-inspired meteor shower across the full 360° sky (100+ meteors).
- *    - Streaks from deep cosmic sky towards the ocean with luminous particle trails.
- *    - Varied sizes, speeds, brightness, and colors (brilliant white, icy blue, cyan, soft gold).
- * 2. METEOR-TO-LOTUS TRANSFORMATION (ONE METEOR = ONE LOTUS):
- *    - Meteor descends -> decelerates above water -> trail converges into core ->
- *      becomes luminous orb -> transforms into closed lotus bud -> petals form.
+ *    - Descends towards the cosmic ocean with luminous trails.
+ *    - Brilliant white, icy blue, cyan, and soft golden tails.
+ * 2. REAL METEOR-TO-LOTUS TRANSFORMATION (ONE METEOR = ONE LOTUS):
+ *    - Moving 3D Meteor Head Mesh (instanced sphere with starlight shader).
+ *    - Deceleration: Decelerates and hovers ~0.28m above ocean destination.
+ *    - Particle Convergence: Trail particles visibly stream forward into the core.
+ *    - Progressive Petal Emergence: Real 3D petals emerge from the core:
+ *      inner 6 petals sprout from stamen, outer 8 petals emerge and wrap into a closed bud.
+ *    - Completion: Bud gently settles onto the ocean surface as a floating closed lotus.
  * 3. THE INFINITE LOTUS FIELD:
- *    - Dozens of floating lotuses across the cosmic ocean (0.55m to 28m distance).
- *    - Translucent cyan, turquoise, lavender, violet, soft pink, and moonlight-white petals.
+ *    - 80-110 floating lotuses distributed across 360° on the cosmic ocean.
  *    - Gentle water bobbing and ocean reflections.
  * 4. EVERY LOTUS IS INDEPENDENTLY INTERACTIVE:
- *    - Reuses Phase 2 lotus geometry (6 inner + 8 outer curved petals, individual base pivots and hinges).
  *    - Starts completely closed.
- *    - Opens when touched/selected; closes when touched/selected again.
- *    - Individually animated petals using smooth organic bloom interpolation.
- *    - Supports Meta Quest 3S hand tracking, Touch controllers, and desktop mouse.
- *    - Opening one flower does NOT affect any other flower.
+ *    - Opens when touched or selected; closes when touched or selected again.
+ *    - Supports Meta Quest 3S hand tracking (fingertip poke), Touch controllers (grip & ray),
+ *      and desktop mouse click & hover.
+ *    - Opening one flower NEVER affects any other flower.
  * 5. THE FINAL CINEMATIC MOMENT:
- *    - Grand hero meteor descends at ~236s directly in front of the seated user.
- *    - Transforms into special central lotus at (0, 0.10, -0.85).
- *    - At 250s (outro release downbeat), it slowly blooms, sending a wave of light across the ocean.
- *    - Surrounding flowers pulse in response; environment settles into serene cosmic lotus ocean.
+ *    - Grand hero meteor descends at ~234s in front of the seated user (0, 0.08, -0.85).
+ *    - Transforms into special central closed lotus bud by ~244s.
+ *    - At 250s (outro downbeat), it slowly blooms, sending a wave of light across the ocean.
+ *    - Surrounding flowers pulse in response; settles into serene cosmic lotus ocean.
  * 6. ZERO PER-FRAME ALLOCATIONS & QUEST 3S OPTIMIZATION:
- *    - InstancedMesh for petals (single draw call for all inner petals, single draw call for all outer petals).
- *    - InstancedBufferAttribute for per-flower bloom progress, touch glow, and color tint.
+ *    - InstancedMesh for meteor heads, inner petals, outer petals, cores, and halos.
+ *    - All transforms, blooms, and colors driven via InstancedBufferAttributes.
  */
 
 import {
   Group,
-  Mesh,
   Points,
   BufferGeometry,
   Float32BufferAttribute,
@@ -45,11 +46,19 @@ import {
   Matrix4,
   Quaternion,
   AdditiveBlending,
-  DoubleSide,
   World,
   Camera,
 } from '@iwsdk/core';
 import { AudioMetrics } from '../audio/AudioAnalyzer.js';
+
+export type FlowerLifecycle =
+  | 'inactive'
+  | 'meteor_fall'
+  | 'meteor_decelerate'
+  | 'particle_converge'
+  | 'petal_emergence'
+  | 'lotus_settle'
+  | 'active_lotus';
 
 export interface FlowerData {
   id: number;
@@ -62,14 +71,17 @@ export interface FlowerData {
   highlightColor: Color;
 
   // Lifecycle state
-  lifecycle: 'inactive' | 'meteor_fall' | 'meteor_converge' | 'bud_form' | 'active_lotus';
+  lifecycle: FlowerLifecycle;
   meteorProgress: number; // 0 to 1
+  decelerateProgress: number; // 0 to 1
   convergeProgress: number; // 0 to 1
-  budFormProgress: number; // 0 to 1
+  emergenceProgress: number; // 0 to 1
+  settleProgress: number; // 0 to 1
 
   // Meteor trajectory
   meteorStartPos: Vector3;
   meteorControlPos: Vector3;
+  meteorHoverPos: Vector3;
   meteorTargetPos: Vector3;
   meteorSpawnTime: number;
   meteorFallDuration: number;
@@ -102,8 +114,10 @@ export class InfiniteBloomLotusField {
   private outerPetalGeo!: BufferGeometry;
   private coreGeo!: BufferGeometry;
   private haloGeo!: BufferGeometry;
+  private meteorHeadGeo!: BufferGeometry;
 
   // Instanced Meshes
+  private instancedMeteorHeads!: InstancedMesh;
   private instancedInnerPetals!: InstancedMesh;
   private instancedOuterPetals!: InstancedMesh;
   private instancedCores!: InstancedMesh;
@@ -121,7 +135,7 @@ export class InfiniteBloomLotusField {
   private coreBloomAttr!: InstancedBufferAttribute;
   private haloBloomAttr!: InstancedBufferAttribute;
 
-  // Meteor Particles System
+  // Meteor Particles System (for dynamic luminous trailing particles)
   private meteorPoints!: Points;
   private meteorGeo!: BufferGeometry;
   private meteorPositions!: Float32Array;
@@ -167,13 +181,12 @@ export class InfiniteBloomLotusField {
   private scratchRayOrigin = new Vector3();
   private scratchRayDir = new Vector3();
   private scratchClosestPoint = new Vector3();
-  private scratchProbePos = new Vector3();
 
   constructor(isQuest = false) {
     this.isQuest = isQuest;
-    this.flowerCount = isQuest ? 48 : 72;
-    this.maxMeteorParticles = isQuest ? 480 : 960;
-    this.maxSparkles = isQuest ? 280 : 500;
+    this.flowerCount = isQuest ? 80 : 110;
+    this.maxMeteorParticles = isQuest ? 850 : 1600;
+    this.maxSparkles = isQuest ? 320 : 600;
 
     this.group.name = 'InfiniteBloomLotusField';
     this.group.visible = false;
@@ -206,7 +219,7 @@ export class InfiniteBloomLotusField {
   }
 
   /**
-   * Generates a curved parametric lotus petal geometry matching GlowingFlower exactly.
+   * Generates a curved parametric lotus petal geometry matching GlowingFlower.
    */
   private createCurvedPetalGeometry(width: number, length: number, cupDepth: number): BufferGeometry {
     const uSegs = 5;
@@ -267,8 +280,9 @@ export class InfiniteBloomLotusField {
     // Outer petals: 8 petals per flower
     this.outerPetalGeo = this.createCurvedPetalGeometry(0.046, 0.092, 0.022);
 
-    this.coreGeo = new SphereGeometry(0.010, this.isQuest ? 8 : 12, this.isQuest ? 6 : 10);
-    this.haloGeo = new SphereGeometry(0.022, 8, 6);
+    this.coreGeo = new SphereGeometry(0.012, this.isQuest ? 8 : 12, this.isQuest ? 6 : 10);
+    this.haloGeo = new SphereGeometry(0.024, 8, 6);
+    this.meteorHeadGeo = new SphereGeometry(0.040, this.isQuest ? 8 : 12, this.isQuest ? 6 : 10);
   }
 
   /**
@@ -284,7 +298,6 @@ export class InfiniteBloomLotusField {
       { base: 0x38bdf8, edge: 0xfef08a, hi: 0xffffff }, // Sky Blue / Gold / Moonlight White
     ];
 
-    // Seeded pseudo-random generator for deterministic, beautiful distribution
     let seed = 12345;
     const random = () => {
       seed = (seed * 9301 + 49297) % 233280;
@@ -293,9 +306,8 @@ export class InfiniteBloomLotusField {
 
     this.flowers = [];
 
-    // Distribute flowers across 360 degrees around the seated user
     for (let i = 0; i < this.flowerCount; i++) {
-      const isHero = i === 0; // Flower 0 is the special Grand Hero Lotus
+      const isHero = i === 0;
       let dist: number;
       let angle: number;
       let worldPos: Vector3;
@@ -308,51 +320,53 @@ export class InfiniteBloomLotusField {
         angle = -Math.PI * 0.5; // Directly in front (local -Z)
         worldPos = new Vector3(0, 0.08, -0.85);
         scale = 1.25;
-        spawnTime = 236.0; // Grand hero meteor spawns at 236.0s
+        spawnTime = 234.0; // Hero meteor descends at 234.0s
       } else {
-        // Staggered rings:
-        // Ring 1 (near arm's reach): 0.55m to 1.3m (12 flowers)
-        // Ring 2 (mid-distance): 1.5m to 4.5m (20 flowers)
+        // Multi-ring 360° distribution:
+        // Ring 1 (arm reach): 0.60m to 1.4m (14 flowers)
+        // Ring 2 (mid-distance): 1.5m to 4.8m (30 flowers)
         // Ring 3 (outer field & horizon): 5.0m to 24.0m (remaining flowers)
-        if (i <= 12) {
-          dist = 0.55 + random() * 0.75;
+        if (i <= 14) {
+          dist = 0.60 + random() * 0.80;
           scale = 0.85 + random() * 0.25;
-        } else if (i <= 32) {
-          dist = 1.5 + random() * 3.0;
+        } else if (i <= 44) {
+          dist = 1.5 + random() * 3.3;
           scale = 0.95 + random() * 0.40;
         } else {
           dist = 5.0 + random() * 19.0;
-          scale = 1.1 + random() * 0.80;
+          scale = 1.1 + random() * 0.85;
         }
 
-        // 360-degree angle with natural jitter
         angle = (i / (this.flowerCount - 1)) * Math.PI * 2 + (random() - 0.5) * 0.45;
-        // Keep clear of initial central Phase 2 lotus corridor (|x| < 0.15 && |z| < 0.80)
         let x = Math.cos(angle) * dist;
         let z = Math.sin(angle) * dist;
+        // Keep clear of initial central Phase 2 lotus corridor
         if (Math.abs(x) < 0.22 && z > -0.9 && z < -0.4) {
           x += x >= 0 ? 0.35 : -0.35;
         }
         worldPos = new Vector3(x, 0.06 + (random() - 0.5) * 0.03, z);
 
-        // Meteor spawn times staggered between 165.0s and 232.0s
-        spawnTime = 166.0 + random() * 66.0;
+        // Meteor spawn times staggered continuously from 165.5s to 233.0s
+        spawnTime = 165.5 + (i / this.flowerCount) * 67.5 + (random() - 0.5) * 2.0;
       }
 
-      // Meteor origin: high in the 360-degree cosmic sky (y = 14m to 26m)
-      const skyAngle = angle + (random() - 0.5) * 0.6;
-      const skyDist = Math.max(12.0, dist * 1.5 + 8.0);
-      const skyHeight = isHero ? 20.0 : (14.0 + random() * 12.0);
+      // Meteor origin: high in the 360-degree cosmic sky (y = 15m to 28m)
+      const skyAngle = angle + (random() - 0.5) * 0.7;
+      const skyDist = Math.max(12.0, dist * 1.6 + 8.0);
+      const skyHeight = isHero ? 22.0 : (15.0 + random() * 13.0);
       const meteorStartPos = new Vector3(
         Math.cos(skyAngle) * skyDist,
         skyHeight,
         Math.sin(skyAngle) * skyDist
       );
 
+      // Deceleration hover position: ~0.28m above ocean destination
+      const meteorHoverPos = new Vector3(worldPos.x, worldPos.y + 0.28 * scale, worldPos.z);
+
       // Curved arc trajectory control point
       const meteorControlPos = new Vector3(
         (meteorStartPos.x + worldPos.x) * 0.5 + (random() - 0.5) * 3.0,
-        skyHeight * 0.45,
+        skyHeight * 0.42,
         (meteorStartPos.z + worldPos.z) * 0.5 + (random() - 0.5) * 3.0
       );
 
@@ -369,13 +383,16 @@ export class InfiniteBloomLotusField {
         highlightColor: new Color(isHero ? 0xffdf80 : pal.hi),
         lifecycle: 'inactive',
         meteorProgress: 0,
+        decelerateProgress: 0,
         convergeProgress: 0,
-        budFormProgress: 0,
+        emergenceProgress: 0,
+        settleProgress: 0,
         meteorStartPos,
         meteorControlPos,
+        meteorHoverPos,
         meteorTargetPos: worldPos.clone(),
         meteorSpawnTime: spawnTime,
-        meteorFallDuration: isHero ? 8.0 : (3.6 + random() * 2.2),
+        meteorFallDuration: isHero ? 4.8 : (3.2 + random() * 1.5),
         meteorCurrentPos: meteorStartPos.clone(),
         isHero,
         isBlooming: false,
@@ -427,7 +444,7 @@ export class InfiniteBloomLotusField {
           vEdgeColor = aEdgeColor;
           vHiColor = aHiColor;
 
-          // Surface flutter
+          // Subtle organic petal fluttering
           float flutter = sin(uTime * 3.0 + position.y * 22.0) * (0.0015 + aTouch * 0.003);
           vec3 pos = position + normal * flutter;
 
@@ -452,50 +469,42 @@ export class InfiniteBloomLotusField {
         varying vec3 vHiColor;
 
         void main() {
-          float tip = vUv.y;
-          float edge = abs(vUv.x - 0.5) * 2.0;
+          vec3 norm = normalize(vNormal);
+          vec3 view = normalize(vViewDir);
 
-          // Crystalline veins
-          float vein1 = sin(vUv.x * 24.0 + vUv.y * 14.0 + uTime * 1.5) * 0.5 + 0.5;
-          float vein2 = cos(vUv.x * 16.0 - vUv.y * 22.0 + uTime * 1.0) * 0.5 + 0.5;
-          float crystalVeins = pow(vein1 * vein2, 1.6) * 2.2;
-          float veinBloom = mix(0.18, 1.0, vBloom);
+          // Dual-rim luminous fresnel
+          float fresnel = 1.0 - abs(dot(norm, view));
+          float rimGlow = pow(fresnel, 2.4);
+          float outerRim = pow(fresnel, 4.0);
 
-          // Fresnel pearlescent rim
-          vec3 n = normalize(vNormal);
-          vec3 v = normalize(vViewDir);
-          float fresnel = pow(1.0 - max(0.0, dot(n, v)), 2.8);
+          // Translucent gradient along petal length
+          vec3 petalGrad = mix(vBaseColor, vEdgeColor, pow(vUv.y, 1.2));
+          petalGrad = mix(petalGrad, vHiColor, pow(vUv.y, 2.5) * 0.65);
 
-          vec3 color = mix(vBaseColor, vEdgeColor, pow(edge, 1.6));
-          color = mix(color, vHiColor, pow(tip, 1.8));
+          // Touch and sound energy
+          vec3 touchTint = vec3(1.0, 0.95, 0.8) * vTouch * 0.65;
+          vec3 soundEnergy = vHiColor * uHigh * 0.25;
 
-          // Veins & Fresnel additive boost
-          color += vEdgeColor * crystalVeins * 0.35 * veinBloom;
-          color += mix(vec3(0.5, 0.8, 1.0), vec3(1.0, 0.9, 0.7), vBloom) * fresnel * 0.75;
-          color += vec3(1.0, 0.85, 0.6) * vTouch * 0.65;
-          color += vec3(0.2, 0.4, 0.6) * uHigh * 0.15;
+          // Base crystal luminescence
+          vec3 finalColor = petalGrad + touchTint + soundEnergy;
+          finalColor += vEdgeColor * rimGlow * (0.8 + 0.4 * sin(uTime * 2.0));
+          finalColor += vec3(1.0, 0.98, 0.9) * outerRim * 0.9;
 
-          float alpha = (0.75 + fresnel * 0.25 + vTouch * 0.2) * uMasterAlpha;
-          gl_FragColor = vec4(color, alpha);
+          float alpha = (0.75 + 0.25 * rimGlow + vTouch * 0.2) * uMasterAlpha;
+          gl_FragColor = vec4(finalColor, alpha);
         }
       `,
       transparent: true,
       blending: AdditiveBlending,
-      side: DoubleSide,
       depthWrite: false,
     });
 
-    // Inner Petals InstancedMesh
-    const innerMat = createPetalShader();
-    this.instancedInnerPetals = new InstancedMesh(this.innerPetalGeo, innerMat, totalInner);
-    this.instancedInnerPetals.instanceMatrix.setUsage(35048); // Dynamic draw usage
-
-    // Outer Petals InstancedMesh
-    const outerMat = createPetalShader();
-    this.instancedOuterPetals = new InstancedMesh(this.outerPetalGeo, outerMat, totalOuter);
+    this.instancedInnerPetals = new InstancedMesh(this.innerPetalGeo, createPetalShader(), totalInner);
+    this.instancedOuterPetals = new InstancedMesh(this.outerPetalGeo, createPetalShader(), totalOuter);
+    this.instancedInnerPetals.instanceMatrix.setUsage(35048); // DYNAMIC_DRAW
     this.instancedOuterPetals.instanceMatrix.setUsage(35048);
 
-    // Per-instance custom attributes
+    // Color and dynamic attributes
     const innerBloom = new Float32Array(totalInner);
     const innerTouch = new Float32Array(totalInner);
     const innerBaseColor = new Float32Array(totalInner * 3);
@@ -510,7 +519,6 @@ export class InfiniteBloomLotusField {
 
     for (let f = 0; f < totalFlowers; f++) {
       const fl = this.flowers[f];
-      // 6 inner petals
       for (let p = 0; p < 6; p++) {
         const idx = f * 6 + p;
         innerBaseColor[idx * 3] = fl.baseColor.r;
@@ -523,7 +531,6 @@ export class InfiniteBloomLotusField {
         innerHiColor[idx * 3 + 1] = fl.highlightColor.g;
         innerHiColor[idx * 3 + 2] = fl.highlightColor.b;
       }
-      // 8 outer petals
       for (let p = 0; p < 8; p++) {
         const idx = f * 8 + p;
         outerBaseColor[idx * 3] = fl.baseColor.r;
@@ -610,15 +617,14 @@ export class InfiniteBloomLotusField {
         varying vec3 vNormal;
         varying float vBloom;
         void main() {
-          float d = 1.0 - max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
-          float pulse = 0.88 + 0.12 * sin(uTime * 2.8);
-          vec3 glowColor = mix(vec3(1.0, 0.82, 0.45), vec3(1.0, 0.98, 0.90), vBloom);
-          gl_FragColor = vec4(glowColor, pow(d, 2.2) * (0.12 + vBloom * 0.65) * pulse * uMasterAlpha);
+          float distFromEdge = max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
+          float glow = pow(distFromEdge, 1.8);
+          vec3 col = mix(vec3(0.4, 0.85, 1.0), vec3(1.0, 0.9, 0.6), vBloom);
+          gl_FragColor = vec4(col * glow * 1.5, glow * 0.75 * uMasterAlpha);
         }
       `,
       transparent: true,
       blending: AdditiveBlending,
-      side: DoubleSide,
       depthWrite: false,
     });
     this.instancedHalos = new InstancedMesh(this.haloGeo, haloMat, totalFlowers);
@@ -631,23 +637,63 @@ export class InfiniteBloomLotusField {
     this.coreGeo.setAttribute('aBloom', this.coreBloomAttr);
     this.haloGeo.setAttribute('aBloom', this.haloBloomAttr);
 
-    // Initial scale: 0 (invisible until spawned)
-    this.scratchMat4.identity().scale(this.scratchVec.set(0, 0, 0));
-    for (let i = 0; i < totalInner; i++) {
-      this.instancedInnerPetals.setMatrixAt(i, this.scratchMat4);
+    // 3. Moving 3D Meteor Head Mesh (Instanced Mesh for 3D Meteor Bodies)
+    const meteorHeadMat = new ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uMasterAlpha: { value: 1.0 },
+      },
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        void main() {
+          vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+          vNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal);
+          vViewDir = -mvPosition.xyz;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uMasterAlpha;
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        void main() {
+          vec3 norm = normalize(vNormal);
+          vec3 view = normalize(vViewDir);
+          float fresnel = 1.0 - max(0.0, dot(norm, view));
+          float rim = pow(fresnel, 2.0);
+          // Radiant white core with glowing cyan/golden starlight aura
+          vec3 coreCol = vec3(1.0, 0.98, 0.92);
+          vec3 haloCol = vec3(0.45, 0.90, 1.0);
+          float pulse = 0.90 + 0.10 * sin(uTime * 8.0);
+          vec3 col = (coreCol * (1.1 - 0.5 * rim) + haloCol * rim * 1.8) * pulse;
+          gl_FragColor = vec4(col, (0.95 + 0.05 * rim) * uMasterAlpha);
+        }
+      `,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    this.instancedMeteorHeads = new InstancedMesh(this.meteorHeadGeo, meteorHeadMat, totalFlowers);
+    this.instancedMeteorHeads.instanceMatrix.setUsage(35048);
+
+    // Initialise all instance matrices collapsed to origin
+    const zeroMat = new Matrix4().scale(new Vector3(0, 0, 0));
+    for (let f = 0; f < totalFlowers; f++) {
+      this.instancedMeteorHeads.setMatrixAt(f, zeroMat);
+      this.instancedCores.setMatrixAt(f, zeroMat);
+      this.instancedHalos.setMatrixAt(f, zeroMat);
+      for (let p = 0; p < 6; p++) this.instancedInnerPetals.setMatrixAt(f * 6 + p, zeroMat);
+      for (let p = 0; p < 8; p++) this.instancedOuterPetals.setMatrixAt(f * 8 + p, zeroMat);
     }
-    for (let i = 0; i < totalOuter; i++) {
-      this.instancedOuterPetals.setMatrixAt(i, this.scratchMat4);
-    }
-    for (let i = 0; i < totalFlowers; i++) {
-      this.instancedCores.setMatrixAt(i, this.scratchMat4);
-      this.instancedHalos.setMatrixAt(i, this.scratchMat4);
-    }
-    this.instancedInnerPetals.instanceMatrix.needsUpdate = true;
-    this.instancedOuterPetals.instanceMatrix.needsUpdate = true;
+    this.instancedMeteorHeads.instanceMatrix.needsUpdate = true;
     this.instancedCores.instanceMatrix.needsUpdate = true;
     this.instancedHalos.instanceMatrix.needsUpdate = true;
+    this.instancedInnerPetals.instanceMatrix.needsUpdate = true;
+    this.instancedOuterPetals.instanceMatrix.needsUpdate = true;
 
+    this.group.add(this.instancedMeteorHeads);
     this.group.add(this.instancedInnerPetals);
     this.group.add(this.instancedOuterPetals);
     this.group.add(this.instancedCores);
@@ -671,7 +717,6 @@ export class InfiniteBloomLotusField {
         uTime: { value: 0 },
       },
       vertexShader: `
-        attribute vec3 color;
         attribute float size;
         attribute float alpha;
         varying vec3 vColor;
@@ -680,7 +725,8 @@ export class InfiniteBloomLotusField {
           vColor = color;
           vAlpha = alpha;
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(size / -mvPosition.z, 2.0, 36.0);
+          gl_PointSize = size * (28.0 / -mvPosition.z);
+          gl_PointSize = clamp(gl_PointSize, 1.0, 90.0);
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
@@ -688,11 +734,12 @@ export class InfiniteBloomLotusField {
         varying vec3 vColor;
         varying float vAlpha;
         void main() {
-          vec2 c = gl_PointCoord - vec2(0.5);
-          float d = length(c);
+          if (vAlpha <= 0.001) discard;
+          vec2 coord = gl_PointCoord - vec2(0.5);
+          float d = length(coord);
           if (d > 0.5) discard;
-          float falloff = pow(1.0 - d * 2.0, 2.2);
-          gl_FragColor = vec4(vColor, falloff * vAlpha);
+          float falloff = pow(1.0 - d * 2.0, 1.8);
+          gl_FragColor = vec4(vColor * falloff, vAlpha * falloff);
         }
       `,
       transparent: true,
@@ -722,7 +769,6 @@ export class InfiniteBloomLotusField {
         uTime: { value: 0 },
       },
       vertexShader: `
-        attribute vec3 color;
         attribute float alpha;
         varying vec3 vColor;
         varying float vAlpha;
@@ -730,7 +776,8 @@ export class InfiniteBloomLotusField {
           vColor = color;
           vAlpha = alpha;
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(24.0 / -mvPosition.z, 2.0, 22.0);
+          gl_PointSize = 18.0 * (15.0 / -mvPosition.z);
+          gl_PointSize = clamp(gl_PointSize, 1.0, 50.0);
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
@@ -738,11 +785,12 @@ export class InfiniteBloomLotusField {
         varying vec3 vColor;
         varying float vAlpha;
         void main() {
-          vec2 c = gl_PointCoord - vec2(0.5);
-          float d = length(c);
+          if (vAlpha <= 0.001) discard;
+          vec2 coord = gl_PointCoord - vec2(0.5);
+          float d = length(coord);
           if (d > 0.5) discard;
-          float falloff = pow(1.0 - d * 2.0, 2.0);
-          gl_FragColor = vec4(vColor, falloff * vAlpha);
+          float star = pow(1.0 - d * 2.0, 2.2);
+          gl_FragColor = vec4(vColor * star, vAlpha * star);
         }
       `,
       transparent: true,
@@ -975,6 +1023,7 @@ export class InfiniteBloomLotusField {
     const low = metrics ? metrics.low : 0;
 
     // Update material time uniforms
+    (this.instancedMeteorHeads.material as ShaderMaterial).uniforms.uTime.value = relativeTime;
     (this.instancedInnerPetals.material as ShaderMaterial).uniforms.uTime.value = relativeTime;
     (this.instancedInnerPetals.material as ShaderMaterial).uniforms.uHigh.value = high;
     (this.instancedOuterPetals.material as ShaderMaterial).uniforms.uTime.value = relativeTime;
@@ -994,7 +1043,7 @@ export class InfiniteBloomLotusField {
         if (heroFl && heroFl.targetBloom < 0.5) {
           heroFl.targetBloom = 1.0;
           heroFl.isBlooming = true;
-          this.emitSparkles(heroFl.worldPos, 35, new Color(0xffdf80));
+          this.emitSparkles(heroFl.worldPos, 40, new Color(0xffdf80));
           this.playChime([1174, 1480, 1760, 2349]);
         }
       }
@@ -1015,10 +1064,12 @@ export class InfiniteBloomLotusField {
     const coreBloomArr = this.coreBloomAttr.array as Float32Array;
     const haloBloomArr = this.haloBloomAttr.array as Float32Array;
 
+    const zeroMat = this.scratchMat4.identity().scale(this.scratchVec.set(0, 0, 0));
+
     for (let f = 0; f < this.flowers.length; f++) {
       const fl = this.flowers[f];
 
-      // Update cooldowns
+      // Update cooldowns & glow decay
       if (fl.touchCooldown > 0) fl.touchCooldown = Math.max(0, fl.touchCooldown - deltaSec);
       if (fl.touchGlow > 0) fl.touchGlow = Math.max(0, fl.touchGlow - deltaSec * 1.5);
       if (fl.waveGlowPulse > 0) fl.waveGlowPulse = Math.max(0, fl.waveGlowPulse - deltaSec * 1.2);
@@ -1033,47 +1084,62 @@ export class InfiniteBloomLotusField {
         }
       }
 
-      // Lifecycle progression:
-      // (a) Not spawned yet
+      // =========================================================================
+      // LIFECYCLE STATE MACHINE (6 EXPLICIT SEQUENTIAL STAGES)
+      // =========================================================================
+
+      // STAGE 0: Inactive (not spawned yet)
       if (relativeTime < fl.meteorSpawnTime) {
         fl.lifecycle = 'inactive';
-        this.scratchMat4.identity().scale(this.scratchVec.set(0, 0, 0));
+        this.instancedMeteorHeads.setMatrixAt(f, zeroMat);
         this.hideFlowerInstances(f);
         continue;
       }
 
       const timeSinceSpawn = relativeTime - fl.meteorSpawnTime;
 
-      // (b) Meteor Falling (Stage 1 & 2)
+      // STAGE 1: METEOR DESCENT (Physical 3D moving meteor head with trailing particles)
       if (timeSinceSpawn < fl.meteorFallDuration) {
         fl.lifecycle = 'meteor_fall';
         fl.meteorProgress = timeSinceSpawn / fl.meteorFallDuration;
         const t = fl.meteorProgress;
 
-        // Quadratic bezier arc trajectory
+        // Quadratic bezier arc trajectory towards hover position above water
         const omt = 1.0 - t;
         fl.meteorCurrentPos.set(0, 0, 0)
           .addScaledVector(fl.meteorStartPos, omt * omt)
           .addScaledVector(fl.meteorControlPos, 2 * omt * t)
-          .addScaledVector(fl.meteorTargetPos, t * t);
+          .addScaledVector(fl.meteorHoverPos, t * t);
 
-        // Meteor particle head and luminous tail
-        const tailSegments = fl.isHero ? 14 : 7;
+        // Position 3D meteor head mesh
+        const headScale = (fl.isHero ? 1.4 : 1.0) * fl.scale;
+        this.scratchMat4.identity().compose(
+          fl.meteorCurrentPos,
+          this.scratchQuat.identity(),
+          this.scratchVec.set(headScale, headScale, headScale)
+        );
+        this.instancedMeteorHeads.setMatrixAt(f, this.scratchMat4);
+
+        // Trailing luminous particles along historical path
+        const tailSegments = fl.isHero ? 16 : 8;
         for (let s = 0; s < tailSegments && meteorParticleCount < this.maxMeteorParticles; s++) {
-          const sT = Math.max(0, t - s * 0.022);
+          const sT = Math.max(0, t - s * 0.024);
           const sOmt = 1.0 - sT;
           const pIdx = meteorParticleCount++;
           const p3 = pIdx * 3;
 
-          this.meteorPositions[p3] = fl.meteorStartPos.x * sOmt * sOmt + fl.meteorControlPos.x * 2 * sOmt * sT + fl.meteorTargetPos.x * sT * sT;
-          this.meteorPositions[p3 + 1] = fl.meteorStartPos.y * sOmt * sOmt + fl.meteorControlPos.y * 2 * sOmt * sT + fl.meteorTargetPos.y * sT * sT;
-          this.meteorPositions[p3 + 2] = fl.meteorStartPos.z * sOmt * sOmt + fl.meteorControlPos.z * 2 * sOmt * sT + fl.meteorTargetPos.z * sT * sT;
+          this.meteorPositions[p3] =
+            fl.meteorStartPos.x * sOmt * sOmt + fl.meteorControlPos.x * 2 * sOmt * sT + fl.meteorHoverPos.x * sT * sT;
+          this.meteorPositions[p3 + 1] =
+            fl.meteorStartPos.y * sOmt * sOmt + fl.meteorControlPos.y * 2 * sOmt * sT + fl.meteorHoverPos.y * sT * sT;
+          this.meteorPositions[p3 + 2] =
+            fl.meteorStartPos.z * sOmt * sOmt + fl.meteorControlPos.z * 2 * sOmt * sT + fl.meteorHoverPos.z * sT * sT;
 
           const fade = 1.0 - s / tailSegments;
-          this.meteorColors[p3] = fl.edgeColor.r * fade + (fl.isHero ? 0.3 : 0.0);
-          this.meteorColors[p3 + 1] = fl.edgeColor.g * fade + (fl.isHero ? 0.3 : 0.0);
-          this.meteorColors[p3 + 2] = fl.edgeColor.b * fade + (fl.isHero ? 0.3 : 0.0);
-          this.meteorSizes[pIdx] = (fl.isHero ? 50.0 : 32.0) * fade;
+          this.meteorColors[p3] = fl.edgeColor.r * fade + (fl.isHero ? 0.35 : 0.0);
+          this.meteorColors[p3 + 1] = fl.edgeColor.g * fade + (fl.isHero ? 0.35 : 0.0);
+          this.meteorColors[p3 + 2] = fl.edgeColor.b * fade + (fl.isHero ? 0.35 : 0.0);
+          this.meteorSizes[pIdx] = (fl.isHero ? 55.0 : 36.0) * fade;
           this.meteorAlphas[pIdx] = fade * 0.95;
         }
 
@@ -1081,58 +1147,296 @@ export class InfiniteBloomLotusField {
         continue;
       }
 
-      const timeSinceLand = timeSinceSpawn - fl.meteorFallDuration;
+      const timeSinceFall = timeSinceSpawn - fl.meteorFallDuration;
+      const decelDuration = 1.2;
 
-      // (c) Meteor Particles Converging into Orb (Stage 3 & 4: 0.0s to 1.4s)
-      if (timeSinceLand < 1.4) {
-        fl.lifecycle = 'meteor_converge';
-        fl.convergeProgress = timeSinceLand / 1.4;
+      // STAGE 2: DECELERATION (Smoothly decelerates and comes to a hover above the ocean)
+      if (timeSinceFall < decelDuration) {
+        fl.lifecycle = 'meteor_decelerate';
+        fl.decelerateProgress = timeSinceFall / decelDuration;
+        const dp = fl.decelerateProgress;
+
+        // Smooth cubic ease-out to gentle hover
+        const smoothDecel = 1.0 - Math.pow(1.0 - dp, 3);
+        fl.meteorCurrentPos.copy(fl.meteorHoverPos);
+
+        // Meteor head hovers and pulses slightly
+        const headScale = (fl.isHero ? 1.4 : 1.0) * fl.scale * (1.0 + 0.15 * Math.sin(dp * Math.PI));
+        this.scratchMat4.identity().compose(
+          fl.meteorCurrentPos,
+          this.scratchQuat.identity(),
+          this.scratchVec.set(headScale, headScale, headScale)
+        );
+        this.instancedMeteorHeads.setMatrixAt(f, this.scratchMat4);
+
+        // Trail particles begin curving forward and condensing toward the hovering core
+        const tailSegments = fl.isHero ? 14 : 7;
+        for (let s = 0; s < tailSegments && meteorParticleCount < this.maxMeteorParticles; s++) {
+          const pIdx = meteorParticleCount++;
+          const p3 = pIdx * 3;
+          const curveRatio = (s / tailSegments) * (1.0 - dp * 0.6);
+          const offsetDist = curveRatio * (fl.isHero ? 1.8 : 1.1);
+
+          this.scratchVec.copy(fl.meteorStartPos).sub(fl.meteorHoverPos).normalize();
+          this.meteorPositions[p3] = fl.meteorHoverPos.x + this.scratchVec.x * offsetDist;
+          this.meteorPositions[p3 + 1] = fl.meteorHoverPos.y + this.scratchVec.y * offsetDist;
+          this.meteorPositions[p3 + 2] = fl.meteorHoverPos.z + this.scratchVec.z * offsetDist;
+
+          const fade = (1.0 - s / tailSegments) * (1.0 - dp * 0.35);
+          this.meteorColors[p3] = fl.highlightColor.r;
+          this.meteorColors[p3 + 1] = fl.highlightColor.g;
+          this.meteorColors[p3 + 2] = fl.highlightColor.b;
+          this.meteorSizes[pIdx] = (fl.isHero ? 45.0 : 30.0) * fade;
+          this.meteorAlphas[pIdx] = fade * 0.90;
+        }
+
+        this.hideFlowerInstances(f);
+        continue;
+      }
+
+      const timeSinceDecel = timeSinceFall - decelDuration;
+      const convergeDuration = 1.2;
+
+      // STAGE 3: PARTICLE CONVERGENCE (Trail particles stream into core, creating glowing orb)
+      if (timeSinceDecel < convergeDuration) {
+        fl.lifecycle = 'particle_converge';
+        fl.convergeProgress = timeSinceDecel / convergeDuration;
         const cp = fl.convergeProgress;
 
-        // Converging particles swirling inward to orb center
-        const convCount = fl.isHero ? 16 : 8;
+        // Trail particles visibly spiral and stream directly into the meteor core
+        const convCount = fl.isHero ? 20 : 10;
         for (let c = 0; c < convCount && meteorParticleCount < this.maxMeteorParticles; c++) {
           const pIdx = meteorParticleCount++;
           const p3 = pIdx * 3;
-          const theta = c * (Math.PI * 2 / convCount) + cp * 12.0;
-          const r = (1.0 - cp) * (fl.isHero ? 1.2 : 0.65);
-          this.meteorPositions[p3] = fl.worldPos.x + Math.cos(theta) * r;
-          this.meteorPositions[p3 + 1] = fl.worldPos.y + Math.sin(theta * 2.0) * r * 0.4 + (1.0 - cp) * 0.25;
-          this.meteorPositions[p3 + 2] = fl.worldPos.z + Math.sin(theta) * r;
+          const theta = c * (Math.PI * 2 / convCount) + cp * 14.0;
+          const r = (1.0 - cp) * (fl.isHero ? 1.4 : 0.85);
+
+          this.meteorPositions[p3] = fl.meteorHoverPos.x + Math.cos(theta) * r;
+          this.meteorPositions[p3 + 1] = fl.meteorHoverPos.y + Math.sin(theta * 2.0) * r * 0.35 + (1.0 - cp) * 0.15;
+          this.meteorPositions[p3 + 2] = fl.meteorHoverPos.z + Math.sin(theta) * r;
 
           this.meteorColors[p3] = fl.highlightColor.r;
           this.meteorColors[p3 + 1] = fl.highlightColor.g;
           this.meteorColors[p3 + 2] = fl.highlightColor.b;
-          this.meteorSizes[pIdx] = (fl.isHero ? 42.0 : 26.0) * cp;
-          this.meteorAlphas[pIdx] = (1.0 - cp * 0.5);
+          this.meteorSizes[pIdx] = (fl.isHero ? 48.0 : 30.0) * (0.4 + 0.6 * cp);
+          this.meteorAlphas[pIdx] = 1.0 - cp * 0.3;
         }
 
-        // Orb emerges at center
-        const orbScale = cp * fl.scale * 1.5;
+        // Concentrated glowing orb pulses at hover height
+        const orbPulse = 1.0 + 0.25 * Math.sin(cp * Math.PI * 4.0);
+        const orbScale = (fl.isHero ? 1.4 : 1.0) * fl.scale * orbPulse * (0.8 + 0.4 * cp);
         this.scratchMat4.identity().compose(
-          fl.worldPos,
+          fl.meteorHoverPos,
           this.scratchQuat.identity(),
           this.scratchVec.set(orbScale, orbScale, orbScale)
         );
+        this.instancedMeteorHeads.setMatrixAt(f, this.scratchMat4);
+
+        // Core and halo begin softly activating inside the orb
         this.instancedCores.setMatrixAt(f, this.scratchMat4);
         this.instancedHalos.setMatrixAt(f, this.scratchMat4);
-        coreBloomArr[f] = cp;
-        haloBloomArr[f] = cp;
+        coreBloomArr[f] = cp * 0.6;
+        haloBloomArr[f] = cp * 0.8;
 
-        // Petals still hidden
         this.hideFlowerPetals(f);
         continue;
       }
 
-      // (d) Orb Transforms into Closed Lotus Bud (Stage 5 & 6: 1.4s to 3.0s)
-      if (timeSinceLand < 3.0) {
-        fl.lifecycle = 'bud_form';
-        fl.budFormProgress = (timeSinceLand - 1.4) / 1.6;
-      } else {
-        fl.lifecycle = 'active_lotus';
+      const timeSinceConverge = timeSinceDecel - convergeDuration;
+      const emergenceDuration = 2.0;
+
+      // STAGE 4: PROGRESSIVE 3D PETAL EMERGENCE (Petals emerge from glowing core to form closed bud)
+      if (timeSinceConverge < emergenceDuration) {
+        fl.lifecycle = 'petal_emergence';
+        fl.emergenceProgress = timeSinceConverge / emergenceDuration;
+        const pe = fl.emergenceProgress;
+
+        // Meteor head seamlessly shrinks as lotus core takes over (continuous transition)
+        const meteorHeadRemain = Math.max(0.0, 1.0 - pe * 1.4);
+        const headScale = (fl.isHero ? 1.4 : 1.0) * fl.scale * meteorHeadRemain;
+        this.scratchMat4.identity().compose(
+          fl.meteorHoverPos,
+          this.scratchQuat.identity(),
+          this.scratchVec.set(headScale, headScale, headScale)
+        );
+        this.instancedMeteorHeads.setMatrixAt(f, this.scratchMat4);
+
+        // Lotus root at hover position
+        this.scratchQuat.setFromAxisAngle(this.scratchVec2.set(0, 1, 0), fl.rotationY);
+        this.scratchFlowerMat4.compose(
+          fl.meteorHoverPos,
+          this.scratchQuat,
+          this.scratchVec2.set(fl.scale, fl.scale, fl.scale)
+        );
+
+        // Central stamen core & halo take full form
+        const coreScale = fl.scale * (0.75 + pe * 0.25);
+        this.scratchMat4.identity().compose(
+          fl.meteorHoverPos,
+          this.scratchQuat,
+          this.scratchVec2.set(coreScale, coreScale, coreScale)
+        );
+        this.instancedCores.setMatrixAt(f, this.scratchMat4);
+        this.instancedHalos.setMatrixAt(f, this.scratchMat4);
+        coreBloomArr[f] = 0.5 + pe * 0.5;
+        haloBloomArr[f] = 0.7 + pe * 0.3;
+
+        // PROGRESSIVE PETAL EMERGENCE:
+        // Inner 6 petals emerge first (pe: 0.0 -> 0.65)
+        // Outer 8 petals emerge second (pe: 0.30 -> 1.00)
+        const innerEmergence = Math.max(0.0, Math.min(1.0, pe / 0.65));
+        const smoothInner = innerEmergence * innerEmergence * (3.0 - 2.0 * innerEmergence);
+
+        const outerEmergence = Math.max(0.0, Math.min(1.0, (pe - 0.30) / 0.70));
+        const smoothOuter = outerEmergence * outerEmergence * (3.0 - 2.0 * outerEmergence);
+
+        // 6 Inner Petals sprout outward from core and curl into inner bud
+        const innerTiers = { count: 6, radius: 0.012, tiltClosed: -0.06 };
+        for (let p = 0; p < 6; p++) {
+          const instIdx = f * 6 + p;
+          if (smoothInner <= 0.001) {
+            this.instancedInnerPetals.setMatrixAt(instIdx, zeroMat);
+            continue;
+          }
+          const angle = (p / innerTiers.count) * Math.PI * 2;
+          const petalScale = smoothInner;
+          // Petals emerge from central core and wrap into closed bud angle
+          const tilt = innerTiers.tiltClosed + (1.0 - smoothInner) * 0.45;
+
+          this.scratchBaseMat4.identity().compose(
+            this.scratchVec2.set(Math.cos(angle) * innerTiers.radius * smoothInner, 0, Math.sin(angle) * innerTiers.radius * smoothInner),
+            this.scratchQuat.setFromAxisAngle(this.scratchVec2.set(0, 1, 0), Math.PI * 0.5 - angle),
+            this.scratchVec2.set(petalScale, petalScale, petalScale)
+          );
+
+          this.scratchHingeMat4.identity().makeRotationX(tilt);
+          this.scratchPetalMat4.multiplyMatrices(this.scratchFlowerMat4, this.scratchBaseMat4);
+          this.scratchPetalMat4.multiply(this.scratchHingeMat4);
+          this.instancedInnerPetals.setMatrixAt(instIdx, this.scratchPetalMat4);
+
+          innerBloomArr[instIdx] = 0.0;
+          innerTouchArr[instIdx] = (1.0 - pe) * 0.8;
+        }
+
+        // 8 Outer Petals sprout from base ring and wrap tightly around inner petals
+        const outerTiers = { count: 8, radius: 0.020, tiltClosed: -0.08 };
+        for (let p = 0; p < 8; p++) {
+          const instIdx = f * 8 + p;
+          if (smoothOuter <= 0.001) {
+            this.instancedOuterPetals.setMatrixAt(instIdx, zeroMat);
+            continue;
+          }
+          const angle = (p / outerTiers.count) * Math.PI * 2 + 0.45;
+          const petalScale = smoothOuter;
+          const tilt = outerTiers.tiltClosed + (1.0 - smoothOuter) * 0.55;
+
+          this.scratchBaseMat4.identity().compose(
+            this.scratchVec2.set(Math.cos(angle) * outerTiers.radius * smoothOuter, 0, Math.sin(angle) * outerTiers.radius * smoothOuter),
+            this.scratchQuat.setFromAxisAngle(this.scratchVec2.set(0, 1, 0), Math.PI * 0.5 - angle),
+            this.scratchVec2.set(petalScale, petalScale, petalScale)
+          );
+
+          this.scratchHingeMat4.identity().makeRotationX(tilt);
+          this.scratchPetalMat4.multiplyMatrices(this.scratchFlowerMat4, this.scratchBaseMat4);
+          this.scratchPetalMat4.multiply(this.scratchHingeMat4);
+          this.instancedOuterPetals.setMatrixAt(instIdx, this.scratchPetalMat4);
+
+          outerBloomArr[instIdx] = 0.0;
+          outerTouchArr[instIdx] = (1.0 - pe) * 0.8;
+        }
+
+        // Emit formative sparkles as petals curl together
+        if (Math.random() < 0.18) {
+          this.emitSparkles(fl.meteorHoverPos, 2, fl.highlightColor);
+        }
+
+        continue;
       }
 
-      // (e) Active Lotus / Bud Form:
+      const timeSinceEmergence = timeSinceConverge - emergenceDuration;
+      const settleDuration = 0.9;
+
+      // STAGE 5: LOTUS SETTLE (Newly formed bud gently settles down to the water surface)
+      if (timeSinceEmergence < settleDuration) {
+        fl.lifecycle = 'lotus_settle';
+        fl.settleProgress = timeSinceEmergence / settleDuration;
+        const sp = fl.settleProgress;
+
+        // Meteor head is now fully transformed and inactive
+        this.instancedMeteorHeads.setMatrixAt(f, zeroMat);
+
+        // Smoothstep interpolation from hover height down to baseY on the ocean surface
+        const smoothSettle = sp * sp * (3.0 - 2.0 * sp);
+        const currentY = fl.meteorHoverPos.y + (fl.baseY - fl.meteorHoverPos.y) * smoothSettle;
+        this.scratchVec.set(fl.worldPos.x, currentY, fl.worldPos.z);
+
+        // Lotus root matrix during settle
+        this.scratchQuat.setFromAxisAngle(this.scratchVec2.set(0, 1, 0), fl.rotationY);
+        this.scratchFlowerMat4.compose(
+          this.scratchVec,
+          this.scratchQuat,
+          this.scratchVec2.set(fl.scale, fl.scale, fl.scale)
+        );
+
+        // Core and halo at settle position
+        const coreScale = fl.scale * 0.80;
+        this.scratchMat4.identity().compose(
+          this.scratchVec,
+          this.scratchQuat,
+          this.scratchVec2.set(coreScale, coreScale, coreScale)
+        );
+        this.instancedCores.setMatrixAt(f, this.scratchMat4);
+        this.instancedHalos.setMatrixAt(f, this.scratchMat4);
+        coreBloomArr[f] = 0.0;
+        haloBloomArr[f] = 0.0;
+
+        // Petals remain tightly closed bud
+        const innerTiers = { count: 6, radius: 0.012, tiltClosed: -0.06 };
+        for (let p = 0; p < 6; p++) {
+          const instIdx = f * 6 + p;
+          const angle = (p / innerTiers.count) * Math.PI * 2;
+          this.scratchBaseMat4.identity().compose(
+            this.scratchVec2.set(Math.cos(angle) * innerTiers.radius, 0, Math.sin(angle) * innerTiers.radius),
+            this.scratchQuat.setFromAxisAngle(this.scratchVec2.set(0, 1, 0), Math.PI * 0.5 - angle),
+            this.scratchVec2.set(1, 1, 1)
+          );
+          this.scratchHingeMat4.identity().makeRotationX(innerTiers.tiltClosed);
+          this.scratchPetalMat4.multiplyMatrices(this.scratchFlowerMat4, this.scratchBaseMat4);
+          this.scratchPetalMat4.multiply(this.scratchHingeMat4);
+          this.instancedInnerPetals.setMatrixAt(instIdx, this.scratchPetalMat4);
+          innerBloomArr[instIdx] = 0.0;
+          innerTouchArr[instIdx] = 0.0;
+        }
+
+        const outerTiers = { count: 8, radius: 0.020, tiltClosed: -0.08 };
+        for (let p = 0; p < 8; p++) {
+          const instIdx = f * 8 + p;
+          const angle = (p / outerTiers.count) * Math.PI * 2 + 0.45;
+          this.scratchBaseMat4.identity().compose(
+            this.scratchVec2.set(Math.cos(angle) * outerTiers.radius, 0, Math.sin(angle) * outerTiers.radius),
+            this.scratchQuat.setFromAxisAngle(this.scratchVec2.set(0, 1, 0), Math.PI * 0.5 - angle),
+            this.scratchVec2.set(1, 1, 1)
+          );
+          this.scratchHingeMat4.identity().makeRotationX(outerTiers.tiltClosed);
+          this.scratchPetalMat4.multiplyMatrices(this.scratchFlowerMat4, this.scratchBaseMat4);
+          this.scratchPetalMat4.multiply(this.scratchHingeMat4);
+          this.instancedOuterPetals.setMatrixAt(instIdx, this.scratchPetalMat4);
+          outerBloomArr[instIdx] = 0.0;
+          outerTouchArr[instIdx] = 0.0;
+        }
+
+        // On touching water (sp near 1.0), emit a soft ocean ripple sparkle
+        if (sp > 0.88 && sp - deltaSec / settleDuration <= 0.88) {
+          this.emitSparkles(fl.worldPos, 6, fl.edgeColor);
+        }
+
+        continue;
+      }
+
+      // STAGE 6: ACTIVE LOTUS (Floating on ocean, starts closed, independently interactive!)
+      fl.lifecycle = 'active_lotus';
+      this.instancedMeteorHeads.setMatrixAt(f, zeroMat);
+
       // Organic bloom interpolation (critically damped spring)
       const prevBloom = fl.bloomProgress;
       const bloomSpeed = 1.9;
@@ -1143,20 +1447,29 @@ export class InfiniteBloomLotusField {
       const bobbing = Math.sin(relativeTime * 1.6 + fl.worldPos.x * 2.0 + fl.worldPos.z * 1.8) * 0.012;
       this.scratchVec.set(fl.worldPos.x, fl.baseY + bobbing, fl.worldPos.z);
 
-      // Growth scale during bud formation (0.35 to 1.0)
-      const currentScale = fl.scale * (fl.lifecycle === 'bud_form' ? (0.35 + fl.budFormProgress * 0.65) : 1.0);
-
       // Flower root matrix
       this.scratchQuat.setFromAxisAngle(this.scratchVec2.set(0, 1, 0), fl.rotationY);
-      this.scratchFlowerMat4.compose(this.scratchVec, this.scratchQuat, this.scratchVec2.set(currentScale, currentScale, currentScale));
+      this.scratchFlowerMat4.compose(
+        this.scratchVec,
+        this.scratchQuat,
+        this.scratchVec2.set(fl.scale, fl.scale, fl.scale)
+      );
 
       // Core & Halo transforms
-      const coreScale = (0.80 + fl.bloomProgress * 0.40) * currentScale;
-      this.scratchMat4.identity().compose(this.scratchVec, this.scratchQuat, this.scratchVec2.set(coreScale, coreScale, coreScale));
+      const coreScale = (0.80 + fl.bloomProgress * 0.40) * fl.scale;
+      this.scratchMat4.identity().compose(
+        this.scratchVec,
+        this.scratchQuat,
+        this.scratchVec2.set(coreScale, coreScale, coreScale)
+      );
       this.instancedCores.setMatrixAt(f, this.scratchMat4);
 
-      const haloScale = (0.75 + fl.bloomProgress * 0.85 + fl.touchGlow * 0.3) * currentScale;
-      this.scratchMat4.identity().compose(this.scratchVec, this.scratchQuat, this.scratchVec2.set(haloScale, haloScale, haloScale));
+      const haloScale = (0.75 + fl.bloomProgress * 0.85 + fl.touchGlow * 0.3) * fl.scale;
+      this.scratchMat4.identity().compose(
+        this.scratchVec,
+        this.scratchQuat,
+        this.scratchVec2.set(haloScale, haloScale, haloScale)
+      );
       this.instancedHalos.setMatrixAt(f, this.scratchMat4);
 
       coreBloomArr[f] = fl.bloomProgress + fl.touchGlow * 0.5 + fl.waveGlowPulse * 0.6;
@@ -1224,6 +1537,7 @@ export class InfiniteBloomLotusField {
     }
 
     // 4. Signal instance matrix updates to GPU
+    this.instancedMeteorHeads.instanceMatrix.needsUpdate = true;
     this.instancedInnerPetals.instanceMatrix.needsUpdate = true;
     this.instancedOuterPetals.instanceMatrix.needsUpdate = true;
     this.instancedCores.instanceMatrix.needsUpdate = true;
@@ -1303,9 +1617,16 @@ export class InfiniteBloomLotusField {
     this.waveRadius = 0.0;
     this.waveStartTime = -1;
 
+    const zeroMat = this.scratchMat4.identity().scale(this.scratchVec.set(0, 0, 0));
+
     for (let f = 0; f < this.flowers.length; f++) {
       const fl = this.flowers[f];
       fl.lifecycle = 'inactive';
+      fl.meteorProgress = 0;
+      fl.decelerateProgress = 0;
+      fl.convergeProgress = 0;
+      fl.emergenceProgress = 0;
+      fl.settleProgress = 0;
       fl.isBlooming = false;
       fl.bloomProgress = 0.0;
       fl.targetBloom = 0.0;
@@ -1313,6 +1634,7 @@ export class InfiniteBloomLotusField {
       fl.touchCooldown = 0.0;
       fl.touchGlow = 0.0;
       fl.waveGlowPulse = 0.0;
+      this.instancedMeteorHeads.setMatrixAt(f, zeroMat);
       this.hideFlowerInstances(f);
     }
 
@@ -1323,6 +1645,7 @@ export class InfiniteBloomLotusField {
       this.sparkleAlphas[p] = 0.0;
     }
 
+    this.instancedMeteorHeads.instanceMatrix.needsUpdate = true;
     this.instancedInnerPetals.instanceMatrix.needsUpdate = true;
     this.instancedOuterPetals.instanceMatrix.needsUpdate = true;
     this.instancedCores.instanceMatrix.needsUpdate = true;
@@ -1333,12 +1656,14 @@ export class InfiniteBloomLotusField {
 
   dispose(): void {
     this.clearXRWorld();
+    this.meteorHeadGeo.dispose();
     this.innerPetalGeo.dispose();
     this.outerPetalGeo.dispose();
     this.coreGeo.dispose();
     this.haloGeo.dispose();
     this.meteorGeo.dispose();
     this.sparkleGeo.dispose();
+    (this.instancedMeteorHeads.material as ShaderMaterial).dispose();
     (this.instancedInnerPetals.material as ShaderMaterial).dispose();
     (this.instancedOuterPetals.material as ShaderMaterial).dispose();
     (this.instancedCores.material as ShaderMaterial).dispose();
